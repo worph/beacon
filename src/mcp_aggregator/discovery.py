@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
-DISCOVERY_MSG = json.dumps({"type": "discovery"}).encode()
+DEFAULT_DISCOVERY_MSG = json.dumps({"type": "discovery"}).encode()
 
 
 @dataclass
@@ -56,8 +56,12 @@ class DiscoveryProtocol(asyncio.DatagramProtocol):
         logger.debug("Discovery protocol error: %s", exc)
 
 
-async def run_discovery(port: int = 9099, timeout: float = 2.0) -> list[DiscoveryResponse]:
+async def run_discovery(port: int = 9099, timeout: float = 2.0, mcp_url: str | None = None) -> list[DiscoveryResponse]:
     """Send UDP broadcast and collect responses from MCP servers."""
+    if mcp_url:
+        msg = json.dumps({"type": "discovery", "mcp_url": mcp_url}).encode()
+    else:
+        msg = DEFAULT_DISCOVERY_MSG
     loop = asyncio.get_running_loop()
     transport, protocol = await loop.create_datagram_endpoint(
         DiscoveryProtocol,
@@ -65,7 +69,7 @@ async def run_discovery(port: int = 9099, timeout: float = 2.0) -> list[Discover
         allow_broadcast=True,
     )
     try:
-        transport.sendto(DISCOVERY_MSG, ("255.255.255.255", port))
+        transport.sendto(msg, ("255.255.255.255", port))
         logger.info("Sent discovery broadcast on port %d, waiting %.1fs...", port, timeout)
         await asyncio.sleep(timeout)
         return protocol.responses

@@ -16,9 +16,10 @@ const dgram = require('dgram');
  * @param {string} [options.path] - HTTP path for the MCP endpoint (default: /mcp). Set if your server uses a non-standard path like /api/mcp.
  * @param {number} [options.listenPort=9099] - UDP port to listen on for discovery broadcasts.
  * @param {Object} [options.auth] - Optional auth descriptor, e.g. { type: 'bearer', token: 'secret' }. Passed to the aggregator so it can authenticate when calling tools.
+ * @param {Function} [options.onDiscovery] - Optional callback invoked when a discovery message is received. Called with { mcp_url } if the broadcast includes it.
  * @returns {dgram.Socket} The socket (call socket.close() to stop).
  */
-function createDiscoveryResponder({ name, description, tools, port = 9099, path, listenPort = 9099, auth }) {
+function createDiscoveryResponder({ name, description, tools, port = 9099, path, listenPort = 9099, auth, onDiscovery }) {
   const payload = { type: 'announce', name, description, tools, port };
   if (path) payload.path = path;
   if (auth) payload.auth = auth;
@@ -32,6 +33,9 @@ function createDiscoveryResponder({ name, description, tools, port = 9099, path,
       if (msg.type === 'discovery') {
         console.log(`Discovery request from ${rinfo.address}:${rinfo.port}, announcing`);
         socket.send(manifest, rinfo.port, rinfo.address);
+        if (onDiscovery) {
+          onDiscovery({ mcp_url: msg.mcp_url || null });
+        }
       }
     } catch {
       // ignore malformed messages

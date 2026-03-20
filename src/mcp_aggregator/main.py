@@ -14,11 +14,11 @@ from mcp_aggregator.web.api import create_web_app
 logger = logging.getLogger("mcp_aggregator")
 
 
-async def discovery_loop(registry: Registry, port: int, interval: float) -> None:
+async def discovery_loop(registry: Registry, port: int, interval: float, mcp_url: str | None = None) -> None:
     """Periodically discover MCP servers."""
     while True:
         try:
-            responses = await run_discovery(port=port)
+            responses = await run_discovery(port=port, mcp_url=mcp_url)
             registry.update_from_discovery(responses)
         except Exception as e:
             logger.error("Discovery error: %s", e)
@@ -33,12 +33,14 @@ async def main() -> None:
     discovery_interval = float(os.environ.get("DISCOVERY_INTERVAL", "60"))
     mcp_port = int(os.environ.get("MCP_PORT", "9099"))
     web_port = int(os.environ.get("WEB_PORT", "3000"))
+    mcp_url = os.environ.get("MCP_URL", f"http://beacon:{mcp_port}/mcp")
 
     registry = Registry()
 
     # Initial discovery
     logger.info("Running initial discovery...")
-    responses = await run_discovery(port=discovery_port)
+    logger.info("Beacon MCP URL: %s", mcp_url)
+    responses = await run_discovery(port=discovery_port, mcp_url=mcp_url)
     registry.update_from_discovery(responses)
     logger.info("Found %d server(s)", len(responses))
 
@@ -57,7 +59,7 @@ async def main() -> None:
     await asyncio.gather(
         mcp_server.serve(),
         web_server.serve(),
-        discovery_loop(registry, discovery_port, discovery_interval),
+        discovery_loop(registry, discovery_port, discovery_interval, mcp_url=mcp_url),
     )
 
 
