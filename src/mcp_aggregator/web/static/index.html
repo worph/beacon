@@ -29,6 +29,44 @@
             </div>
         </section>
 
+        <section class="setup-info">
+            <h2>Setup</h2>
+            <p class="setup-desc">Add Beacon to your LLM client to access all discovered tools through a single MCP connection.</p>
+
+            <div class="setup-block">
+                <h3>Claude Code (CLI)</h3>
+                <div class="copyable code-block">
+                    <code id="setup-cli">claude mcp add beacon --transport http http://localhost:9099/mcp</code>
+                    <button onclick="copyText('setup-cli')" title="Copy">&#x2398;</button>
+                </div>
+            </div>
+
+            <div class="setup-block">
+                <h3>MCP Settings (JSON)</h3>
+                <div class="copyable code-block">
+                    <pre id="setup-json">{
+  "mcpServers": {
+    "beacon": {
+      "type": "streamableHttp",
+      "url": "http://localhost:9099/mcp"
+    }
+  }
+}</pre>
+                    <button onclick="copyText('setup-json')" title="Copy">&#x2398;</button>
+                </div>
+            </div>
+
+            <div class="setup-block">
+                <h3>How It Works</h3>
+                <ol class="how-it-works">
+                    <li>Beacon broadcasts a UDP discovery packet on the <code>mcp-net</code> Docker network every 30s</li>
+                    <li>MCP servers with a discovery responder reply with their name, description, and tool list</li>
+                    <li>Beacon registers all tools with namespacing: <code>{server}__{tool}</code></li>
+                    <li>Your LLM client connects once to Beacon and gets access to every tool from every server</li>
+                </ol>
+            </div>
+        </section>
+
         <section class="controls">
             <button id="discover-btn" onclick="triggerDiscovery()">Refresh Discovery</button>
             <label class="toggle">

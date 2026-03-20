@@ -1,13 +1,14 @@
 services:
   aggregator:
     build: .
+    hostname: beacon
     ports:
       - "9099:9099"
-      - "3000:3000"
+      - "9300:9300"
     environment:
       - DISCOVERY_INTERVAL=30
       - DISCOVERY_PORT=9099
-      - WEB_PORT=3000
+      - WEB_PORT=9300
       - LOG_LEVEL=info
     networks:
       - mcp-net
@@ -37,4 +38,5 @@ services:
 
 networks:
   mcp-net:
+    name: mcp-net
     driver: bridge
