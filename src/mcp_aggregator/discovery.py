@@ -17,6 +17,8 @@ class DiscoveryResponse:
     tools: list[dict]
     ip: str
     port: int
+    path: str = "/mcp"
+    auth: dict | None = None
 
 
 class DiscoveryProtocol(asyncio.DatagramProtocol):
@@ -40,6 +42,8 @@ class DiscoveryProtocol(asyncio.DatagramProtocol):
                 tools=payload.get("tools", []),
                 ip=addr[0],
                 port=payload.get("port", 9099),
+                path=payload.get("path", "/mcp"),
+                auth=payload.get("auth"),
             )
             # Deduplicate by name
             if not any(r.name == resp.name for r in self.responses):

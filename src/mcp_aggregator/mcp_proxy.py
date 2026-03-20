@@ -41,7 +41,7 @@ def create_mcp_app(registry: Registry) -> Starlette:
                 isError=True,
             )
         srv, tool_name = resolved
-        return await call_remote_tool(srv.ip, srv.port, tool_name, arguments)
+        return await call_remote_tool(srv.ip, srv.port, tool_name, arguments, srv.path, srv.auth)
 
     session_manager = StreamableHTTPSessionManager(app=server, stateless=True)
 

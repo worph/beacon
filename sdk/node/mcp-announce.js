@@ -13,17 +13,16 @@ const dgram = require('dgram');
  * @param {string} options.description - Human-readable description.
  * @param {Array} options.tools - List of tool definitions (name, description, inputSchema).
  * @param {number} [options.port=9099] - The HTTP port where the MCP server is listening.
+ * @param {string} [options.path] - HTTP path for the MCP endpoint (default: /mcp). Set if your server uses a non-standard path like /api/mcp.
  * @param {number} [options.listenPort=9099] - UDP port to listen on for discovery broadcasts.
+ * @param {Object} [options.auth] - Optional auth descriptor, e.g. { type: 'bearer', token: 'secret' }. Passed to the aggregator so it can authenticate when calling tools.
  * @returns {dgram.Socket} The socket (call socket.close() to stop).
  */
-function createDiscoveryResponder({ name, description, tools, port = 9099, listenPort = 9099 }) {
-  const manifest = JSON.stringify({
-    type: 'announce',
-    name,
-    description,
-    tools,
-    port,
-  });
+function createDiscoveryResponder({ name, description, tools, port = 9099, path, listenPort = 9099, auth }) {
+  const payload = { type: 'announce', name, description, tools, port };
+  if (path) payload.path = path;
+  if (auth) payload.auth = auth;
+  const manifest = JSON.stringify(payload);
 
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 

@@ -18,6 +18,8 @@ class RegisteredServer:
     ip: str
     port: int
     tools: list[dict]
+    path: str = "/mcp"
+    auth: dict | None = None
     last_seen: float = field(default_factory=time.time)
 
 
@@ -38,6 +40,8 @@ class Registry:
                 ip=resp.ip,
                 port=resp.port,
                 tools=resp.tools,
+                path=resp.path,
+                auth=resp.auth,
                 last_seen=now,
             )
         added = set(new_servers) - set(self.servers)

@@ -1,5 +1,6 @@
 """REST API and static file serving for the web UI."""
 
+import os
 import time
 
 from fastapi import FastAPI
@@ -24,7 +25,9 @@ def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
                 "description": s.description,
                 "ip": s.ip,
                 "port": s.port,
+                "path": s.path,
                 "tools": s.tools,
+                "authenticated": s.auth is not None,
                 "last_seen": s.last_seen,
             }
             for s in registry.servers.values()
@@ -40,7 +43,9 @@ def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
             "description": server.description,
             "ip": server.ip,
             "port": server.port,
+            "path": server.path,
             "tools": server.tools,
+            "authenticated": server.auth is not None,
             "last_seen": server.last_seen,
         }
 
@@ -53,8 +58,10 @@ def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
     @app.get("/api/status")
     async def status():
         total_tools = sum(len(s.tools) for s in registry.servers.values())
+        hostname = os.environ.get("HOSTNAME", os.uname().nodename) or "localhost"
         return {
             "status": "ok",
+            "hostname": hostname,
             "uptime_seconds": round(time.time() - _start_time, 1),
             "servers": len(registry.servers),
             "tools": total_tools,

@@ -34,7 +34,9 @@ async def create_discovery_responder(
     description: str,
     tools: list[dict[str, Any]],
     port: int = 9099,
+    path: str | None = None,
     listen_port: int = 9099,
+    auth: dict[str, str] | None = None,
 ) -> asyncio.DatagramTransport:
     """Start a UDP listener that responds to discovery broadcasts.
 
@@ -43,18 +45,26 @@ async def create_discovery_responder(
         description: Human-readable description.
         tools: List of tool definitions (name, description, inputSchema).
         port: The HTTP port where the MCP server is listening.
+        path: HTTP path for the MCP endpoint (default: /mcp). Set if your
+              server uses a non-standard path like /api/mcp.
         listen_port: UDP port to listen on for discovery broadcasts.
+        auth: Optional auth descriptor, e.g. {"type": "bearer", "token": "secret"}.
+              Passed to the aggregator so it can authenticate when calling tools.
 
     Returns:
         The transport (call .close() to stop).
     """
-    manifest = {
+    manifest: dict[str, Any] = {
         "type": "announce",
         "name": name,
         "description": description,
         "tools": tools,
         "port": port,
     }
+    if path:
+        manifest["path"] = path
+    if auth:
+        manifest["auth"] = auth
     loop = asyncio.get_running_loop()
     transport, _ = await loop.create_datagram_endpoint(
         lambda: _AnnounceProtocol(manifest),
