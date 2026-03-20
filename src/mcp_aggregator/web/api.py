@@ -14,7 +14,7 @@ _start_time = time.time()
 
 
 def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
-    app = FastAPI(title="MCP Aggregator", version="0.1.0")
+    app = FastAPI(title="Beacon", version="0.1.0")
 
     @app.get("/api/servers")
     async def list_servers():
