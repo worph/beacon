@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Beacon — MCP Aggregator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Beacon</h1>
+        <p class="subtitle">MCP Aggregator</p>
+    </header>
+
+    <main>
+        <section class="status-bar" id="status-bar">
+            <span id="status-text">Loading...</span>
+        </section>
+
+        <section class="connection-info">
+            <h2>Connection</h2>
+            <div class="info-row">
+                <label>MCP Endpoint</label>
+                <div class="copyable">
+                    <code id="mcp-url">http://localhost:9099/mcp</code>
+                    <button onclick="copyText('mcp-url')" title="Copy">&#x2398;</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="controls">
+            <button id="discover-btn" onclick="triggerDiscovery()">Refresh Discovery</button>
+            <label class="toggle">
+                <input type="checkbox" id="auto-refresh" onchange="toggleAutoRefresh()">
+                Auto-refresh
+            </label>
+        </section>
+
+        <section class="servers">
+            <h2>Discovered Servers</h2>
+            <div id="servers-container">
+                <p class="empty">No servers discovered yet.</p>
+            </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
