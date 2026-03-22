@@ -2,6 +2,8 @@
 
 A local-only MCP (Model Context Protocol) aggregator that unifies multiple MCP servers behind a single endpoint. MCP servers running as Docker containers are automatically discovered on the shared network — no Docker socket required, no config files to maintain.
 
+> **Security model:** Beacon is a local-only discovery protocol. It trusts all announcements on the Docker network unconditionally — any container on `mcp-net` can announce itself as any server with any tools. There is no authentication of discovery responses and no verification of server identity. Do not expose Beacon or `mcp-net` to untrusted networks.
+
 ## How It Works
 
 Beacon acts as a **service mesh for MCP servers**. Instead of configuring each MCP server individually in your LLM client, you point the client at Beacon once and it handles the rest.
@@ -17,7 +19,7 @@ Beacon acts as a **service mesh for MCP servers**. Instead of configuring each M
 ┌──────┴──────────────────┴─────────────────┴──────┐
 │                   Beacon                          │
 │                                                   │
-│  1. Broadcasts {"type":"discovery"} on UDP :9099  │
+│  1. Multicasts {"type":"discovery"} on UDP :9099   │
 │  2. Servers respond with their tool manifests      │
 │  3. Beacon registers tools with namespacing        │
 │  4. Exposes unified MCP endpoint on :9099/mcp      │
@@ -36,10 +38,10 @@ Beacon acts as a **service mesh for MCP servers**. Instead of configuring each M
 
 ### The Discovery Cycle
 
-Every 30 seconds (configurable via `DISCOVERY_INTERVAL`), Beacon:
+Every 60 seconds by default (configurable via `DISCOVERY_INTERVAL`), Beacon:
 
-1. **Broadcasts** a UDP packet `{"type":"discovery"}` to `255.255.255.255:9099` on the Docker network
-2. **Listens** for 2 seconds — any MCP server on the `mcp-net` network that has a discovery responder replies with its manifest (name, description, tools, HTTP port)
+1. **Sends** a UDP discovery packet to both multicast group `239.255.99.1:9099` and broadcast `255.255.255.255:9099` on the Docker network
+2. **Listens** for 2 seconds — any MCP server on the shared network that has a discovery responder (joined to the multicast group) replies with its manifest (name, description, tools, HTTP port)
 3. **Rebuilds** its internal registry from the responses — new servers appear, gone servers disappear
 4. **Namespaces** all tools as `{server_name}__{tool_name}` (e.g. `lystik__add_item`) to avoid name collisions
 
@@ -56,11 +58,17 @@ SDKs are provided for both Python and Node.js (see `sdk/`) — adding discovery 
 
 ### Docker Networking
 
-All services must join the shared `mcp-net` bridge network. Beacon creates this network; other stacks reference it as `external: true`. MCP servers don't need to expose ports to the host — all communication is container-to-container. Only Beacon maps ports to the host.
+All services must be on the same Docker bridge network. Create the shared network before starting any stack:
+
+```bash
+docker network create mcp-net
+```
+
+Any network created with `docker network create` works — Beacon uses **UDP multicast** (`239.255.99.1`) for discovery, which is supported on all Docker bridge networks. Broadcast (`255.255.255.255`) is also sent as a fallback. MCP servers don't need to expose ports to the host — all communication is container-to-container. Only Beacon maps ports to the host.
 
 ## Key Design Principles
 
-- **Local only** — designed for a single machine, no auth needed
+- **Local only** — designed for a single machine; no auth, all announcements are trusted
 - **Pure network discovery** — no Docker socket mount, no config files
 - **Single well-known port** — `9099` for UDP discovery + HTTP MCP
 - **Ephemeral registry** — servers re-announce on every discovery cycle
@@ -70,7 +78,10 @@ All services must join the shared `mcp-net` bridge network. Beacon creates this 
 ## Quick Start
 
 ```bash
-# Start Beacon (creates the mcp-net network)
+# Create the shared network (once)
+docker network create mcp-net
+
+# Start Beacon
 cd mcp-aggregator
 docker compose up -d
 
@@ -167,7 +178,7 @@ networks:
     external: true
 ```
 
-The `mcp-net` network is created by Beacon's stack. Start Beacon first, then your server.
+The `mcp-net` network must be created before starting any stack: `docker network create mcp-net`
 
 ## Ports
 
@@ -175,7 +186,7 @@ The `mcp-net` network is created by Beacon's stack. Start Beacon first, then you
 |---|---|---|
 | Beacon MCP | `localhost:9099` | MCP streamable HTTP endpoint (`/mcp`) |
 | Beacon Web UI | `localhost:9300` | Dashboard, server list, connection info |
-| UDP Discovery | `9099` (internal) | Broadcast discovery on Docker network |
+| UDP Discovery | `9099` (internal) | Multicast + broadcast discovery on Docker network |
 
 ## Web UI
 
@@ -194,10 +205,6 @@ docker compose up -d --build
 # Rebuild after code changes
 docker compose up -d --build
 ```
-
-## Architecture
-
-See [IMPLEMENTATION.md](./IMPLEMENTATION.md) for detailed technical notes.
 
 ## License
 

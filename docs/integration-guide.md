@@ -4,10 +4,12 @@ How to make your MCP server discoverable by the Beacon aggregator.
 
 ## Overview
 
-Beacon discovers MCP servers via UDP broadcast on a shared Docker network. Your server needs to do two things:
+Beacon discovers MCP servers via UDP multicast (group `239.255.99.1`) and broadcast on a shared Docker network. It is a local-only discovery protocol — there is no authentication of announcements and all responses are trusted unconditionally. Any container on the shared network can announce itself as any server. Do not expose Beacon or the discovery network to untrusted networks.
+
+Your server needs to do two things:
 
 1. **Listen for UDP discovery requests** on port `9099` and respond with a manifest
-2. **Serve MCP over HTTP** at `/mcp` on port `9099` (streamable HTTP transport)
+2. **Serve MCP over HTTP** at `/mcp` (streamable HTTP transport, port `9099` by default but configurable)
 
 You can implement the UDP protocol directly (~30 lines) or use the provided Python SDK.
 
@@ -109,12 +111,8 @@ CMD ["python", "server.py"]
 Add your server to the `mcp-net` network alongside the aggregator:
 
 ```yaml
+# In your server's own docker-compose.yml (separate from Beacon's stack)
 services:
-  aggregator:
-    # ... existing aggregator config ...
-    networks:
-      - mcp-net
-
   my-server:
     build: ./my-server
     networks:
@@ -122,7 +120,7 @@ services:
 
 networks:
   mcp-net:
-    driver: bridge
+    external: true  # Created with: docker network create mcp-net
 ```
 
 ## UDP Discovery Protocol
@@ -131,11 +129,13 @@ If you're not using Python, implement the protocol directly. It's two UDP messag
 
 ### Discovery Request (from aggregator)
 
-The aggregator broadcasts this JSON to `255.255.255.255:9099`:
+The aggregator sends this JSON to both multicast group `239.255.99.1:9099` and broadcast `255.255.255.255:9099`:
 
 ```json
 {"type": "discovery"}
 ```
+
+Discovery responders must join multicast group `239.255.99.1` to receive packets on networks where broadcast is not forwarded (e.g. plain `docker network create`). The SDKs handle this automatically.
 
 ### Announce Response (from your server)
 
@@ -207,7 +207,7 @@ LLM clients see and call the namespaced name. The aggregator strips the prefix a
 
 The protocol is language-agnostic. You need:
 
-1. A UDP socket listening on port `9099` that responds to `{"type":"discovery"}` with your announce JSON
+1. A UDP socket listening on port `9099`, joined to multicast group `239.255.99.1`, that responds to `{"type":"discovery"}` with your announce JSON
 2. An MCP server using streamable HTTP transport on port `9099` at path `/mcp`
 
 ### Go Example (UDP responder only)
@@ -266,9 +266,9 @@ The SDK respects no environment variables, but the mock servers use these conven
 ## Troubleshooting
 
 **Server not discovered:**
-- Verify your container is on the same Docker network as the aggregator (`mcp-net`)
+- Verify your container is on the same Docker network as the aggregator (e.g. `mcp-net`)
 - Check that UDP port 9099 is exposed in your Dockerfile
-- Trigger manual discovery: `curl -X POST http://localhost:3000/api/discover`
+- Trigger manual discovery: `curl -X POST http://localhost:9300/api/discover`
 
 **421 Misdirected Request when aggregator calls tools:**
 - You need `transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False)` in your FastMCP config

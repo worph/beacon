@@ -1,12 +1,15 @@
-"""UDP broadcast discovery for MCP servers on the local network."""
+"""UDP multicast + broadcast discovery for MCP servers on the local network."""
 
 import asyncio
 import json
 import logging
+import socket
+import struct
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+MULTICAST_GROUP = "239.255.99.1"
 DEFAULT_DISCOVERY_MSG = json.dumps({"type": "discovery"}).encode()
 
 
@@ -69,8 +72,14 @@ async def run_discovery(port: int = 9099, timeout: float = 2.0, mcp_url: str | N
         allow_broadcast=True,
     )
     try:
+        # Set multicast TTL to 1 (link-local only)
+        sock = transport.get_extra_info("socket")
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
+
+        # Send to both multicast group and broadcast for maximum compatibility
+        transport.sendto(msg, (MULTICAST_GROUP, port))
         transport.sendto(msg, ("255.255.255.255", port))
-        logger.info("Sent discovery broadcast on port %d, waiting %.1fs...", port, timeout)
+        logger.info("Sent discovery multicast+broadcast on port %d, waiting %.1fs...", port, timeout)
         await asyncio.sleep(timeout)
         return protocol.responses
     finally:

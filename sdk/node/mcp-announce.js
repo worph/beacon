@@ -47,7 +47,10 @@ function createDiscoveryResponder({ name, description, tools, port = 9099, path,
   });
 
   socket.bind(listenPort, '0.0.0.0', () => {
-    console.log(`Discovery responder listening on UDP :${listenPort} for ${name}`);
+    // Join multicast group so we receive discovery packets on networks
+    // where broadcast doesn't work (e.g. plain `docker network create`)
+    socket.addMembership('239.255.99.1');
+    console.log(`Discovery responder listening on UDP :${listenPort} (multicast 239.255.99.1) for ${name}`);
   });
 
   return socket;

@@ -63,7 +63,7 @@
             <div class="setup-block">
                 <h3>How It Works</h3>
                 <ol class="how-it-works">
-                    <li>Beacon broadcasts a UDP discovery packet on the <code>mcp-net</code> Docker network every 30s</li>
+                    <li>Beacon sends a UDP multicast discovery packet on the Docker network every 30s</li>
                     <li>MCP servers with a discovery responder reply with their name, description, and tool list</li>
                     <li>Beacon registers all tools with namespacing: <code>{server}__{tool}</code></li>
                     <li>Your LLM client connects once to Beacon and gets access to every tool from every server</li>

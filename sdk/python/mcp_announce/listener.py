@@ -3,9 +3,13 @@
 import asyncio
 import json
 import logging
+import socket
+import struct
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+MULTICAST_GROUP = "239.255.99.1"
 
 
 class _AnnounceProtocol(asyncio.DatagramProtocol):
@@ -77,5 +81,13 @@ async def create_discovery_responder(
         local_addr=("0.0.0.0", listen_port),
         allow_broadcast=True,
     )
-    logger.info("Discovery responder listening on UDP :%d for %s", listen_port, name)
+
+    # Join multicast group so we receive discovery packets on networks
+    # where broadcast doesn't work (e.g. plain `docker network create`)
+    sock = transport.get_extra_info("socket")
+    group = socket.inet_aton(MULTICAST_GROUP)
+    mreq = struct.pack("4sL", group, socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+    logger.info("Discovery responder listening on UDP :%d (multicast %s) for %s", listen_port, MULTICAST_GROUP, name)
     return transport

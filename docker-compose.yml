@@ -16,27 +16,27 @@ services:
       - mock-notes
       - mock-tasks
 
-  mock-notes:
-    build:
-      context: .
-      dockerfile: mock-servers/mock-notes/Dockerfile
-    environment:
-      - MCP_PORT=9099
-      - DISCOVERY_PORT=9099
-    networks:
-      - mcp-net
+  # uncomment if you want to test
+  # mock-notes:
+    # build:
+      # context: .
+      # dockerfile: mock-servers/mock-notes/Dockerfile
+    # environment:
+      # - MCP_PORT=9099
+      # - DISCOVERY_PORT=9099
+    # networks:
+      # - mcp-net
 
-  mock-tasks:
-    build:
-      context: .
-      dockerfile: mock-servers/mock-tasks/Dockerfile
-    environment:
-      - MCP_PORT=9099
-      - DISCOVERY_PORT=9099
-    networks:
-      - mcp-net
+  # mock-tasks:
+    # build:
+      # context: .
+      # dockerfile: mock-servers/mock-tasks/Dockerfile
+    # environment:
+      # - MCP_PORT=9099
+      # - DISCOVERY_PORT=9099
+    # networks:
+      # - mcp-net
 
 networks:
   mcp-net:
-    name: mcp-net
-    driver: bridge
+    external: true
