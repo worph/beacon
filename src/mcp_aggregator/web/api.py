@@ -5,7 +5,7 @@ import os
 import time
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -70,13 +70,20 @@ def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
     async def status():
         total_tools = sum(len(s.tools) for s in registry.servers.values())
         hostname = os.environ.get("HOSTNAME", os.uname().nodename) or "localhost"
+        web_port = int(os.environ.get("WEB_PORT", "3000"))
         return {
             "status": "ok",
             "hostname": hostname,
+            "port": web_port,
             "uptime_seconds": round(time.time() - _start_time, 1),
             "servers": len(registry.servers),
             "tools": total_tools,
         }
+
+    # Redirect /mcp to /mcp/ so clients work with or without trailing slash
+    @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "PUT"])
+    async def mcp_redirect():
+        return RedirectResponse(url="/mcp/", status_code=307)
 
     # Mount MCP endpoint before static files
     app.mount("/mcp", app=session_manager.handle_request)

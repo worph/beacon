@@ -14,16 +14,16 @@ async function fetchStatus() {
         const data = await res.json();
         document.getElementById("status-text").textContent =
             `${data.servers} server(s) | ${data.tools} tool(s) | uptime ${formatUptime(data.uptime_seconds)}`;
-        if (data.hostname) {
-            updateConnectionInfo(data.hostname);
+        if (data.hostname && data.port) {
+            updateConnectionInfo(data.hostname, data.port);
         }
     } catch (e) {
         document.getElementById("status-text").textContent = "Disconnected";
     }
 }
 
-function updateConnectionInfo(hostname) {
-    const mcpUrl = `http://${hostname}:9300/mcp/`;
+function updateConnectionInfo(hostname, port) {
+    const mcpUrl = `http://${hostname}:${port}/mcp`;
     document.getElementById("mcp-url").textContent = mcpUrl;
     document.getElementById("setup-cli").textContent =
         `claude mcp add beacon --transport http ${mcpUrl}`;
