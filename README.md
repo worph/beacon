@@ -22,10 +22,10 @@ Beacon acts as a **service mesh for MCP servers**. Instead of configuring each M
 │  1. Multicasts {"type":"discovery"} on UDP :9099   │
 │  2. Servers respond with their tool manifests      │
 │  3. Beacon registers tools with namespacing        │
-│  4. Exposes unified MCP endpoint on :9099/mcp      │
+│  4. Exposes 3 meta-tools on :9300/mcp/             │
 │                                                   │
-│  Web UI:       http://localhost:9300               │
-│  MCP Endpoint: http://localhost:9099/mcp           │
+│  Web UI + MCP: http://localhost:9300               │
+│  MCP Endpoint: http://localhost:9300/mcp/          │
 └──────────────────────────────────────────────────┘
        │
        │  single MCP connection
@@ -45,7 +45,19 @@ Every 60 seconds by default (configurable via `DISCOVERY_INTERVAL`), Beacon:
 3. **Rebuilds** its internal registry from the responses — new servers appear, gone servers disappear
 4. **Namespaces** all tools as `{server_name}__{tool_name}` (e.g. `lystik__add_item`) to avoid name collisions
 
-When an LLM client calls a tool through Beacon's MCP endpoint, Beacon resolves the namespace, opens a fresh HTTP connection to the target server's `/mcp` endpoint, forwards the JSON-RPC call, and returns the result.
+### Context-Friendly Meta-Tools
+
+Instead of exposing every discovered tool directly (which can overwhelm the LLM context window), Beacon exposes **3 meta-tools**:
+
+| Meta-tool | Purpose |
+|---|---|
+| `overview` | List all available tools with one-line descriptions, grouped by server |
+| `tool_doc` | Get the full schema/description for a specific tool |
+| `call` | Call a tool on a discovered server by its namespaced name |
+
+The LLM sees only these 3 tools regardless of how many servers are discovered. It calls `overview` to discover capabilities, optionally `tool_doc` for the full schema, then `call` to invoke the tool.
+
+**Hybrid direct mode:** Individual tools can be marked `"direct": true` in their tool definition to also appear as first-class MCP tools alongside the meta-tools. This is useful for high-frequency tools where the extra indirection would be wasteful.
 
 ### Making Your MCP Server Discoverable
 
@@ -70,59 +82,11 @@ Any network created with `docker network create` works — Beacon uses **UDP mul
 
 - **Local only** — designed for a single machine; no auth, all announcements are trusted
 - **Pure network discovery** — no Docker socket mount, no config files
-- **Single well-known port** — `9099` for UDP discovery + HTTP MCP
+- **Single well-known port** — `9099` for UDP discovery (internal), `9300` for MCP + Web UI (public)
 - **Ephemeral registry** — servers re-announce on every discovery cycle
 - **Namespaced tools** — `{server_name}__{tool_name}` avoids collisions
+- **Context-friendly** — 3 meta-tools instead of N tools; scales without flooding the LLM context
 - **Stack independence** — each MCP server runs from its own docker-compose; Beacon doesn't need to build or manage them
-
-## Quick Start
-
-```bash
-# Create the shared network (once)
-docker network create mcp-net
-
-# Start Beacon
-cd mcp-aggregator
-docker compose up -d
-
-# Start any MCP server from its own stack (e.g. lystik)
-cd ../lystik
-docker compose up -d
-
-# Open the web UI to see discovered servers
-open http://localhost:9300
-```
-
-## Connecting Claude Code
-
-Add Beacon as an MCP server — this is the only MCP config you need, regardless of how many servers are behind it:
-
-```bash
-claude mcp add beacon --transport http http://localhost:9099/mcp
-```
-
-Or add it manually to your MCP settings (`~/.claude/settings.json` or project `.mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "beacon": {
-      "type": "streamableHttp",
-      "url": "http://localhost:9099/mcp"
-    }
-  }
-}
-```
-
-Once connected, all tools from all discovered servers are available in Claude. Tools are namespaced, so if Beacon discovers a server called `lystik` with a tool `add_item`, it appears as `beacon:lystik__add_item` in Claude.
-
-### Other LLM Clients
-
-Any client supporting MCP streamable HTTP transport can connect to:
-
-```
-http://localhost:9099/mcp
-```
 
 ## Writing a Beacon-Compatible MCP Server
 
@@ -184,8 +148,7 @@ The `mcp-net` network must be created before starting any stack: `docker network
 
 | Service | Port | Description |
 |---|---|---|
-| Beacon MCP | `localhost:9099` | MCP streamable HTTP endpoint (`/mcp`) |
-| Beacon Web UI | `localhost:9300` | Dashboard, server list, connection info |
+| Beacon (public) | `localhost:9300` | Web UI + MCP endpoint at `/mcp/` |
 | UDP Discovery | `9099` (internal) | Multicast + broadcast discovery on Docker network |
 
 ## Web UI
@@ -195,6 +158,55 @@ Available at `http://localhost:9300`:
 - **Dashboard** — list of all discovered MCP servers and their tools
 - **Connection Info** — copy-paste config for connecting LLM clients
 - **Refresh** — manually trigger a discovery broadcast
+
+## Quick Start
+
+```bash
+# Create the shared network (once)
+docker network create mcp-net
+
+# Start Beacon
+cd mcp-aggregator
+docker compose up -d
+
+# Start any MCP server from its own stack (e.g. lystik)
+cd ../lystik
+docker compose up -d
+
+# Open the web UI to see discovered servers
+open http://localhost:9300
+```
+
+## Connecting Claude Code
+
+Add Beacon as an MCP server — this is the only MCP config you need, regardless of how many servers are behind it:
+
+```bash
+claude mcp add beacon --transport http http://localhost:9300/mcp/
+```
+
+Or add it manually to your MCP settings (`~/.claude/settings.json` or project `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "beacon": {
+      "type": "streamableHttp",
+      "url": "http://localhost:9300/mcp/"
+    }
+  }
+}
+```
+
+Once connected, all tools from all discovered servers are available in Claude. Tools are namespaced, so if Beacon discovers a server called `lystik` with a tool `add_item`, it appears as `beacon:lystik__add_item` in Claude.
+
+### Other LLM Clients
+
+Any client supporting MCP streamable HTTP transport can connect to:
+
+```
+http://localhost:9300/mcp/
+```
 
 ## Development
 

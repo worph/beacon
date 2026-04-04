@@ -7,7 +7,6 @@ import os
 import uvicorn
 
 from mcp_aggregator.discovery import run_discovery
-from mcp_aggregator.mcp_proxy import create_mcp_app
 from mcp_aggregator.registry import Registry
 from mcp_aggregator.web.api import create_web_app
 
@@ -31,9 +30,8 @@ async def main() -> None:
 
     discovery_port = int(os.environ.get("DISCOVERY_PORT", "9099"))
     discovery_interval = float(os.environ.get("DISCOVERY_INTERVAL", "60"))
-    mcp_port = int(os.environ.get("MCP_PORT", "9099"))
     web_port = int(os.environ.get("WEB_PORT", "3000"))
-    mcp_url = os.environ.get("MCP_URL", f"http://beacon:{mcp_port}/mcp")
+    mcp_url = os.environ.get("MCP_URL", f"http://beacon:{web_port}/mcp")
 
     registry = Registry()
 
@@ -44,20 +42,13 @@ async def main() -> None:
     registry.update_from_discovery(responses)
     logger.info("Found %d server(s)", len(responses))
 
-    mcp_app = create_mcp_app(registry)
     web_app = create_web_app(registry, discovery_port=discovery_port)
-
-    mcp_config = uvicorn.Config(mcp_app, host="0.0.0.0", port=mcp_port, log_level=log_level.lower())
     web_config = uvicorn.Config(web_app, host="0.0.0.0", port=web_port, log_level=log_level.lower())
-
-    mcp_server = uvicorn.Server(mcp_config)
     web_server = uvicorn.Server(web_config)
 
-    logger.info("Starting MCP endpoint on :%d/mcp", mcp_port)
-    logger.info("Starting Web UI on :%d", web_port)
+    logger.info("Starting Beacon on :%d (Web UI + MCP at /mcp)", web_port)
 
     await asyncio.gather(
-        mcp_server.serve(),
         web_server.serve(),
         discovery_loop(registry, discovery_port, discovery_interval, mcp_url=mcp_url),
     )

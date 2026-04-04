@@ -62,6 +62,7 @@ TOOL_DEFS = [
         "name": "list_notes",
         "description": "List all notes.",
         "inputSchema": {"type": "object", "properties": {}},
+        "direct": True,
     },
     {
         "name": "get_note",

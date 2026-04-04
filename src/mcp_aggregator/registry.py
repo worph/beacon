@@ -62,6 +62,53 @@ class Registry:
                 tools.append(namespaced)
         return tools
 
+    def get_instructions(self) -> str:
+        """Build server instructions with a one-liner per discovered server."""
+        lines = ["Beacon MCP aggregator. Call overview to see all available tools.", ""]
+        lines.append("Available servers:")
+        for server in self.servers.values():
+            lines.append(f"- {server.name} — {server.description}")
+        return "\n".join(lines)
+
+    def get_overview_text(self) -> str:
+        """Build a compact overview of all servers and tools (names + descriptions only)."""
+        lines: list[str] = []
+        for server in self.servers.values():
+            lines.append(f"## {server.name}")
+            lines.append(server.description)
+            for tool in server.tools:
+                namespaced = f"{server.name}{NAMESPACE_SEP}{tool['name']}"
+                desc = tool.get("description", "")
+                lines.append(f"- {namespaced} — {desc}")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    def get_tool_doc(self, namespaced_name: str) -> dict | None:
+        """Return the full tool definition (name, description, inputSchema) for a namespaced tool."""
+        result = self.resolve_tool(namespaced_name)
+        if result is None:
+            return None
+        server, tool_name = result
+        for tool in server.tools:
+            if tool["name"] == tool_name:
+                doc = tool.copy()
+                doc["name"] = namespaced_name
+                doc["server"] = server.name
+                doc["server_description"] = server.description
+                return doc
+        return None
+
+    def get_direct_tools(self) -> list[dict]:
+        """Return namespaced tool dicts for tools marked as direct."""
+        tools = []
+        for server in self.servers.values():
+            for tool in server.tools:
+                if tool.get("direct"):
+                    namespaced = tool.copy()
+                    namespaced["name"] = f"{server.name}{NAMESPACE_SEP}{tool['name']}"
+                    tools.append(namespaced)
+        return tools
+
     def resolve_tool(self, namespaced_name: str) -> tuple[RegisteredServer, str] | None:
         """Resolve a namespaced tool name to (server, original_tool_name)."""
         parts = namespaced_name.split(NAMESPACE_SEP, 1)

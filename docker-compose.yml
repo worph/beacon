@@ -2,8 +2,9 @@ services:
   beacon:
     build: .
     hostname: beacon
+    expose:
+      - 9099
     ports:
-      - "9099:9099"
       - "9300:9300"
     environment:
       - DISCOVERY_INTERVAL=30
@@ -12,9 +13,6 @@ services:
       - LOG_LEVEL=info
     networks:
       - mcp-net
-    depends_on:
-      - mock-notes
-      - mock-tasks
 
   # uncomment if you want to test
   # mock-notes:

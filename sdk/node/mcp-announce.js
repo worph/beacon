@@ -12,6 +12,8 @@ const dgram = require('dgram');
  * @param {string} options.name - Server name for identification.
  * @param {string} options.description - Human-readable description.
  * @param {Array} options.tools - List of tool definitions (name, description, inputSchema).
+ *   Each tool object may include an optional `direct: true` flag to have Beacon expose
+ *   the tool as a first-class MCP tool alongside its meta-tools, instead of only through `beacon_call`.
  * @param {number} [options.port=9099] - The HTTP port where the MCP server is listening.
  * @param {string} [options.path] - HTTP path for the MCP endpoint (default: /mcp). Set if your server uses a non-standard path like /api/mcp.
  * @param {number} [options.listenPort=9099] - UDP port to listen on for discovery broadcasts.

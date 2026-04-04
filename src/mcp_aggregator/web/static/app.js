@@ -23,7 +23,7 @@ async function fetchStatus() {
 }
 
 function updateConnectionInfo(hostname) {
-    const mcpUrl = `http://${hostname}:9099/mcp`;
+    const mcpUrl = `http://${hostname}:9300/mcp/`;
     document.getElementById("mcp-url").textContent = mcpUrl;
     document.getElementById("setup-cli").textContent =
         `claude mcp add beacon --transport http ${mcpUrl}`;

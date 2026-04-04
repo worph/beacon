@@ -52,6 +52,9 @@ async def create_discovery_responder(
         name: Server name for identification.
         description: Human-readable description.
         tools: List of tool definitions (name, description, inputSchema).
+              Each tool dict may include an optional ``"direct": True`` flag
+              to have Beacon expose the tool as a first-class MCP tool alongside
+              its meta-tools, instead of only through ``beacon_call``.
         port: The HTTP port where the MCP server is listening.
         path: HTTP path for the MCP endpoint (default: /mcp). Set if your
               server uses a non-standard path like /api/mcp.

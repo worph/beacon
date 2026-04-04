@@ -1,5 +1,6 @@
 """REST API and static file serving for the web UI."""
 
+import contextlib
 import os
 import time
 
@@ -8,14 +9,24 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
+from starlette.routing import Mount
+
 from mcp_aggregator.discovery import run_discovery
+from mcp_aggregator.mcp_proxy import create_mcp_session_manager
 from mcp_aggregator.registry import Registry
 
 _start_time = time.time()
 
 
 def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
-    app = FastAPI(title="Beacon", version="0.1.0")
+    session_manager = create_mcp_session_manager(registry)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI):
+        async with session_manager.run():
+            yield
+
+    app = FastAPI(title="Beacon", version="0.1.0", lifespan=lifespan)
 
     @app.get("/api/servers")
     async def list_servers():
@@ -66,6 +77,9 @@ def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
             "servers": len(registry.servers),
             "tools": total_tools,
         }
+
+    # Mount MCP endpoint before static files
+    app.mount("/mcp", app=session_manager.handle_request)
 
     # Mount static files last so API routes take precedence
     static_dir = Path(__file__).parent / "static"

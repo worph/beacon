@@ -53,21 +53,6 @@ h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
     color: var(--fg2);
 }
 
-.connection-info {
-    margin-bottom: 1.5rem;
-}
-
-.info-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-.info-row label {
-    font-size: 0.85rem;
-    color: var(--fg2);
-    min-width: 100px;
-}
 
 .copyable {
     display: flex;
@@ -358,12 +343,43 @@ button#discover-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .setup-info {
     margin-bottom: 1.5rem;
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
 }
 
-.setup-desc {
-    font-size: 0.85rem;
+.setup-info > summary {
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+}
+
+.setup-info > summary::-webkit-details-marker,
+.setup-info > summary::marker {
+    display: none;
+    content: "";
+}
+
+.setup-info > summary::before {
+    content: "\25B6";
+    font-size: 0.6rem;
     color: var(--fg2);
-    margin-bottom: 1rem;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
+
+.setup-info[open] > summary::before {
+    content: "\25BC";
+}
+
+.setup-info > summary h2 {
+    display: inline;
+    margin-bottom: 0;
+}
+
+.setup-info > summary:hover {
+    color: var(--accent);
 }
 
 .setup-block {

@@ -29,20 +29,16 @@
             </div>
         </section>
 
-        <section class="connection-info">
-            <h2>Connection</h2>
-            <div class="info-row">
-                <label>MCP Endpoint</label>
-                <div class="copyable">
+        <details class="setup-info">
+            <summary><h2>Setup</h2></summary>
+
+            <div class="setup-block">
+                <h3>MCP Endpoint</h3>
+                <div class="copyable code-block">
                     <code id="mcp-url">Loading...</code>
                     <button onclick="copyText('mcp-url')" title="Copy">&#x2398;</button>
                 </div>
             </div>
-        </section>
-
-        <section class="setup-info">
-            <h2>Setup</h2>
-            <p class="setup-desc">Add Beacon to your LLM client to access all discovered tools through a single MCP connection.</p>
 
             <div class="setup-block">
                 <h3>Claude Code (CLI)</h3>
@@ -69,7 +65,7 @@
                     <li>Your LLM client connects once to Beacon and gets access to every tool from every server</li>
                 </ol>
             </div>
-        </section>
+        </details>
     </main>
 
     <script src="app.js"></script>
