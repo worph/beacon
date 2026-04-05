@@ -64,7 +64,7 @@ class Registry:
 
     def get_instructions(self) -> str:
         """Build server instructions with a one-liner per discovered server."""
-        lines = ["Beacon MCP aggregator. Call overview to see all available tools.", ""]
+        lines = ["Beacon MCP aggregator. Call server_doc with a server name to get full tool schemas for that server.", ""]
         lines.append("Available servers:")
         for server in self.servers.values():
             lines.append(f"- {server.name} — {server.description}")
@@ -97,6 +97,22 @@ class Registry:
                 doc["server_description"] = server.description
                 return doc
         return None
+
+    def get_server_doc(self, server_name: str) -> dict | None:
+        """Return full documentation for all tools on a given server."""
+        server = self.servers.get(server_name)
+        if server is None:
+            return None
+        tools = []
+        for tool in server.tools:
+            doc = tool.copy()
+            doc["name"] = f"{server.name}{NAMESPACE_SEP}{tool['name']}"
+            tools.append(doc)
+        return {
+            "server": server.name,
+            "description": server.description,
+            "tools": tools,
+        }
 
     def get_direct_tools(self) -> list[dict]:
         """Return namespaced tool dicts for tools marked as direct."""

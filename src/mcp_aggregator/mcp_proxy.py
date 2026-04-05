@@ -37,6 +37,20 @@ META_TOOLS = [
         },
     ),
     types.Tool(
+        name="server_doc",
+        description="Get the full schema and description for all tools on a specific server.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "server_name": {
+                    "type": "string",
+                    "description": "Server name as shown in overview, e.g. 'mock-notes'",
+                },
+            },
+            "required": ["server_name"],
+        },
+    ),
+    types.Tool(
         name="call",
         description="Call a tool on a discovered MCP server.",
         inputSchema={
@@ -98,6 +112,18 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
             if doc is None:
                 return types.CallToolResult(
                     content=[types.TextContent(type="text", text=f"Unknown tool: {tool_name}")],
+                    isError=True,
+                )
+            return types.CallToolResult(
+                content=[types.TextContent(type="text", text=json.dumps(doc, indent=2))],
+            )
+
+        if name == "server_doc":
+            server_name = arguments.get("server_name", "")
+            doc = registry.get_server_doc(server_name)
+            if doc is None:
+                return types.CallToolResult(
+                    content=[types.TextContent(type="text", text=f"Unknown server: {server_name}")],
                     isError=True,
                 )
             return types.CallToolResult(
