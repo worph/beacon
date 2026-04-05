@@ -26,7 +26,7 @@ function updateConnectionInfo(hostname, port) {
     const mcpUrl = `http://${hostname}:${port}/mcp`;
     document.getElementById("mcp-url").textContent = mcpUrl;
     document.getElementById("setup-cli").textContent =
-        `claude mcp add beacon --transport http ${mcpUrl}`;
+        `claude mcp add beacon -s user --transport http ${mcpUrl}`;
     document.getElementById("setup-json").textContent = JSON.stringify({
         mcpServers: {
             beacon: {
@@ -145,7 +145,16 @@ async function triggerDiscovery() {
 
 function copyText(id) {
     const text = document.getElementById(id).textContent;
-    navigator.clipboard.writeText(text);
+    const btn = event.currentTarget;
+    navigator.clipboard.writeText(text).then(() => {
+        const original = btn.innerHTML;
+        btn.textContent = "Copied!";
+        btn.classList.add("copied");
+        setTimeout(() => {
+            btn.innerHTML = original;
+            btn.classList.remove("copied");
+        }, 1500);
+    });
 }
 
 function esc(str) {

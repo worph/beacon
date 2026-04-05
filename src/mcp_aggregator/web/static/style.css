@@ -71,14 +71,17 @@ h2 { font-size: 1.1rem; margin-bottom: 0.75rem; }
 
 .copyable button {
     background: none;
-    border: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
     cursor: pointer;
-    font-size: 1rem;
+    font-size: 0.75rem;
     color: var(--fg2);
-    padding: 0 0.25rem;
+    padding: 0.2rem 0.5rem;
+    white-space: nowrap;
 }
 
 .copyable button:hover { color: var(--accent); }
+.copyable button.copied { color: var(--success); font-weight: 600; }
 
 .controls {
     display: flex;
