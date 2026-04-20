@@ -15,14 +15,49 @@ async function fetchStatus() {
         document.getElementById("status-text").textContent =
             `${data.servers} server(s) | ${data.tools} tool(s) | uptime ${formatUptime(data.uptime_seconds)}`;
         if (data.hostname && data.port) {
-            updateConnectionInfo(data.hostname, data.port);
+            updateConnectionInfo(data.hostname, data.port, data.public_url, data.auth_hash);
         }
     } catch (e) {
         document.getElementById("status-text").textContent = "Disconnected";
     }
 }
 
-function updateConnectionInfo(hostname, port) {
+function deriveMcpName(publicUrl) {
+    try {
+        return new URL(publicUrl).hostname.replace(/\./g, "-");
+    } catch (e) {
+        return "beacon";
+    }
+}
+
+function updateConnectionInfo(hostname, port, publicUrl, authHash) {
+    const remoteBlock = document.getElementById("remote-setup");
+    const localBlock = document.getElementById("local-setup");
+
+    if (publicUrl) {
+        const remoteUrl = authHash
+            ? `${publicUrl}?hash=${encodeURIComponent(authHash)}`
+            : publicUrl;
+        const name = deriveMcpName(publicUrl);
+        document.getElementById("remote-mcp-url").textContent = remoteUrl;
+        document.getElementById("remote-setup-cli").textContent =
+            `claude mcp add ${name} -s user --transport http "${remoteUrl}"`;
+        document.getElementById("remote-setup-json").textContent = JSON.stringify({
+            mcpServers: {
+                [name]: {
+                    type: "streamableHttp",
+                    url: remoteUrl,
+                },
+            },
+        }, null, 2);
+        remoteBlock.style.display = "";
+        localBlock.style.display = "none";
+        return;
+    }
+
+    remoteBlock.style.display = "none";
+    localBlock.style.display = "";
+
     const mcpUrl = `http://${hostname}:${port}/mcp`;
     document.getElementById("mcp-url").textContent = mcpUrl;
     document.getElementById("setup-cli").textContent =

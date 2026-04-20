@@ -18,7 +18,12 @@ from mcp_aggregator.registry import Registry
 _start_time = time.time()
 
 
-def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
+def create_web_app(
+    registry: Registry,
+    discovery_port: int = 9099,
+    public_url: str | None = None,
+    auth_hash: str | None = None,
+) -> FastAPI:
     session_manager = create_mcp_session_manager(registry)
 
     @contextlib.asynccontextmanager
@@ -75,6 +80,8 @@ def create_web_app(registry: Registry, discovery_port: int = 9099) -> FastAPI:
             "status": "ok",
             "hostname": hostname,
             "port": web_port,
+            "public_url": public_url,
+            "auth_hash": auth_hash,
             "uptime_seconds": round(time.time() - _start_time, 1),
             "servers": len(registry.servers),
             "tools": total_tools,

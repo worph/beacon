@@ -32,6 +32,8 @@ async def main() -> None:
     discovery_interval = float(os.environ.get("DISCOVERY_INTERVAL", "60"))
     web_port = int(os.environ.get("WEB_PORT", "3000"))
     mcp_url = os.environ.get("MCP_URL", f"http://beacon:{web_port}/mcp")
+    public_url = os.environ.get("PUBLIC_URL") or None
+    auth_hash = os.environ.get("AUTH_HASH") or None
 
     registry = Registry()
 
@@ -42,7 +44,12 @@ async def main() -> None:
     registry.update_from_discovery(responses)
     logger.info("Found %d server(s)", len(responses))
 
-    web_app = create_web_app(registry, discovery_port=discovery_port)
+    web_app = create_web_app(
+        registry,
+        discovery_port=discovery_port,
+        public_url=public_url,
+        auth_hash=auth_hash,
+    )
     web_config = uvicorn.Config(web_app, host="0.0.0.0", port=web_port, log_level=log_level.lower())
     web_server = uvicorn.Server(web_config)
 

@@ -208,6 +208,16 @@ Any client supporting MCP streamable HTTP transport can connect to:
 http://localhost:9300/mcp/
 ```
 
+### Remote Connections (behind an auth proxy)
+
+When Beacon sits behind an HTTPS proxy with hash-based auth (e.g. `nginx-hash-lock`), set `PUBLIC_URL` and `AUTH_HASH` on the Beacon container and the Web UI will render a ready-to-paste `claude mcp add` command with `?hash=...` appended:
+
+```yaml
+environment:
+  PUBLIC_URL: "https://beacon.example.com/mcp"
+  AUTH_HASH: "your-hash-token"
+```
+
 ## Development
 
 ```bash
