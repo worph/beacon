@@ -4,7 +4,7 @@ import contextlib
 import os
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -87,10 +87,15 @@ def create_web_app(
             "tools": total_tools,
         }
 
-    # Redirect /mcp to /mcp/ so clients work with or without trailing slash
+    # Redirect /mcp to /mcp/ so clients work with or without trailing slash.
+    # Preserve the query string so auth params like ?hash=... survive the hop
+    # (nginx-hash-lock and similar proxies validate on every request).
     @app.api_route("/mcp", methods=["GET", "POST", "DELETE", "PUT"])
-    async def mcp_redirect():
-        return RedirectResponse(url="/mcp/", status_code=307)
+    async def mcp_redirect(request: Request):
+        target = "/mcp/"
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(url=target, status_code=307)
 
     # Mount MCP endpoint before static files
     app.mount("/mcp", app=session_manager.handle_request)
