@@ -67,7 +67,13 @@ def create_web_app(
 
     @app.post("/api/discover")
     async def trigger_discovery():
-        responses = await run_discovery(port=discovery_port)
+        try:
+            responses = await run_discovery(port=discovery_port)
+        except Exception as e:
+            return JSONResponse(
+                {"error": f"{type(e).__name__}: {e}"},
+                status_code=500,
+            )
         registry.update_from_discovery(responses)
         return {"discovered": len(responses), "servers": [r.name for r in responses]}
 

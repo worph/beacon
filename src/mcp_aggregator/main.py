@@ -20,7 +20,7 @@ async def discovery_loop(registry: Registry, port: int, interval: float, mcp_url
             responses = await run_discovery(port=port, mcp_url=mcp_url)
             registry.update_from_discovery(responses)
         except Exception as e:
-            logger.error("Discovery error: %s", e)
+            logger.error("Discovery error: %s", e, exc_info=True)
         await asyncio.sleep(interval)
 
 
