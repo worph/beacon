@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 MCP_CLIENT_TIMEOUT = float(os.environ.get("MCP_CLIENT_TIMEOUT", "300"))
 
 
-def _build_headers(auth: dict | None) -> dict[str, str]:
-    """Build HTTP headers from an auth descriptor."""
+def build_auth_headers(auth: dict | None) -> dict[str, str]:
+    """Build HTTP headers from an auth descriptor used by discovered servers."""
     if not auth:
         return {}
     auth_type = auth.get("type")
@@ -26,7 +26,7 @@ def _build_headers(auth: dict | None) -> dict[str, str]:
     raise ValueError(f"unsupported auth type {auth_type!r}")
 
 
-def _format_exc(e: BaseException) -> str:
+def format_exc(e: BaseException) -> str:
     """Flatten ExceptionGroup sub-exceptions into a readable string.
 
     anyio task groups (used inside the MCP streamable_http client) wrap failures
@@ -34,25 +34,21 @@ def _format_exc(e: BaseException) -> str:
     TaskGroup (N sub-exception)". Walk the group so the caller sees the real cause.
     """
     if isinstance(e, BaseExceptionGroup):
-        inner = [_format_exc(sub) for sub in e.exceptions]
+        inner = [format_exc(sub) for sub in e.exceptions]
         return "; ".join(inner) if inner else repr(e)
     msg = str(e) or repr(e)
     return f"{type(e).__name__}: {msg}"
 
 
 async def call_remote_tool(
-    server_ip: str,
-    server_port: int,
+    url: str,
+    headers: dict[str, str],
     tool_name: str,
     arguments: dict[str, Any] | None = None,
-    path: str = "/mcp",
-    auth: dict | None = None,
 ) -> types.CallToolResult:
     """Call a tool on a remote MCP server via streamable HTTP."""
-    url = f"http://{server_ip}:{server_port}{path}"
     logger.info("Calling %s on %s", tool_name, url)
     try:
-        headers = _build_headers(auth)
         timeout = httpx.Timeout(MCP_CLIENT_TIMEOUT, connect=10.0)
         async with httpx.AsyncClient(headers=headers, timeout=timeout) as http_client:
             async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream, _):
@@ -67,8 +63,32 @@ async def call_remote_tool(
             content=[
                 types.TextContent(
                     type="text",
-                    text=f"Error calling remote tool {tool_name} at {url}: {_format_exc(e)}",
+                    text=f"Error calling remote tool {tool_name} at {url}: {format_exc(e)}",
                 )
             ],
             isError=True,
         )
+
+
+async def fetch_remote_tools(
+    url: str,
+    headers: dict[str, str],
+    connect_timeout: float = 10.0,
+    read_timeout: float = 30.0,
+) -> tuple[str, list[dict]]:
+    """Connect to a remote MCP server and return (server instructions, tool list)."""
+    timeout = httpx.Timeout(read_timeout, connect=connect_timeout)
+    async with httpx.AsyncClient(headers=headers, timeout=timeout) as http_client:
+        async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream, _):
+            async with ClientSession(read_stream, write_stream) as session:
+                init_result = await session.initialize()
+                tools_result = await session.list_tools()
+                tools = [
+                    {
+                        "name": t.name,
+                        "description": t.description or "",
+                        "inputSchema": t.inputSchema or {"type": "object", "properties": {}},
+                    }
+                    for t in tools_result.tools
+                ]
+                return (init_result.instructions or "", tools)

@@ -29,6 +29,41 @@
             </div>
         </section>
 
+        <section class="external">
+            <details>
+                <summary><h2>External MCP Servers</h2></summary>
+                <p class="hint">
+                    Add any HTTP MCP server (no Beacon SDK needed). Beacon will connect over streamable HTTP
+                    to fetch the tool list and proxy calls through. Configs persist to disk.
+                </p>
+
+                <div id="external-list" class="external-list"></div>
+
+                <div class="external-add">
+                    <h3>Add server(s)</h3>
+                    <p class="hint">
+                        Paste a <code>mcpServers</code> JSON bundle (Claude Desktop format) <em>or</em> a single
+                        <code>{ "name": ..., "url": ..., "headers": { ... } }</code> object.
+                    </p>
+                    <textarea id="external-json" rows="10" spellcheck="false" placeholder='{
+  "mcpServers": {
+    "n8n-mcp": {
+      "type": "http",
+      "url": "https://n8n.example.com/mcp-server/http",
+      "headers": {
+        "Authorization": "Bearer eyJ..."
+      }
+    }
+  }
+}'></textarea>
+                    <div class="external-actions">
+                        <button id="external-add-btn" onclick="addExternal()">Add</button>
+                        <span id="external-feedback" class="external-feedback"></span>
+                    </div>
+                </div>
+            </details>
+        </section>
+
         <details class="setup-info">
             <summary><h2>Setup</h2></summary>
 

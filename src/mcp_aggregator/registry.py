@@ -1,4 +1,4 @@
-"""Registry of discovered MCP servers and their namespaced tools."""
+"""Registry of discovered and externally-configured MCP servers."""
 
 import logging
 import time
@@ -15,22 +15,43 @@ NAMESPACE_SEP = "__"
 class RegisteredServer:
     name: str
     description: str
-    ip: str
-    port: int
     tools: list[dict]
+    # Local discovered servers use ip/port/path/auth. External servers use url/headers.
+    ip: str = ""
+    port: int = 0
     path: str = "/mcp"
     auth: dict | None = None
+    url: str | None = None
+    headers: dict[str, str] | None = None
+    origin: str = "discovery"  # "discovery" | "external"
     last_seen: float = field(default_factory=time.time)
+    error: str | None = None
+
+    def endpoint_url(self) -> str:
+        if self.url:
+            return self.url
+        return f"http://{self.ip}:{self.port}{self.path}"
 
 
 class Registry:
-    """Stores discovered MCP servers and provides namespaced tool lookups."""
+    """Stores MCP servers (discovered + external) and provides namespaced tool lookups."""
 
     def __init__(self) -> None:
-        self.servers: dict[str, RegisteredServer] = {}
+        self._discovered: dict[str, RegisteredServer] = {}
+        self._external: dict[str, RegisteredServer] = {}
+
+    @property
+    def servers(self) -> dict[str, RegisteredServer]:
+        """All servers, discovered merged with external. External wins on name collision."""
+        merged = dict(self._discovered)
+        for name, srv in self._external.items():
+            if name in merged:
+                logger.warning("External server %r shadows a discovered server with the same name", name)
+            merged[name] = srv
+        return merged
 
     def update_from_discovery(self, responses: list[DiscoveryResponse]) -> None:
-        """Full replace of registry from discovery responses."""
+        """Full replace of the discovered set. Leaves external servers untouched."""
         now = time.time()
         new_servers: dict[str, RegisteredServer] = {}
         for resp in responses:
@@ -42,15 +63,25 @@ class Registry:
                 tools=resp.tools,
                 path=resp.path,
                 auth=resp.auth,
+                origin="discovery",
                 last_seen=now,
             )
-        added = set(new_servers) - set(self.servers)
-        removed = set(self.servers) - set(new_servers)
+        added = set(new_servers) - set(self._discovered)
+        removed = set(self._discovered) - set(new_servers)
         if added:
             logger.info("New servers: %s", added)
         if removed:
             logger.info("Removed servers: %s", removed)
-        self.servers = new_servers
+        self._discovered = new_servers
+
+    def set_external(self, name: str, server: RegisteredServer) -> None:
+        self._external[name] = server
+
+    def remove_external(self, name: str) -> bool:
+        return self._external.pop(name, None) is not None
+
+    def list_external(self) -> list[RegisteredServer]:
+        return list(self._external.values())
 
     def get_all_namespaced_tools(self) -> list[dict]:
         """Return all tools with namespace-prefixed names."""
@@ -63,7 +94,7 @@ class Registry:
         return tools
 
     def get_instructions(self) -> str:
-        """Build server instructions with a one-liner per discovered server."""
+        """Build server instructions with a one-liner per server."""
         lines = ["Beacon MCP aggregator. Call server_doc with a server name to get full tool schemas for that server.", ""]
         lines.append("Available servers:")
         for server in self.servers.values():

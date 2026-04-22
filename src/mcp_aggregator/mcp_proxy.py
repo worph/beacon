@@ -11,8 +11,8 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from mcp_aggregator.mcp_client import call_remote_tool
-from mcp_aggregator.registry import Registry
+from mcp_aggregator.mcp_client import build_auth_headers, call_remote_tool
+from mcp_aggregator.registry import RegisteredServer, Registry
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +70,13 @@ META_TOOLS = [
         },
     ),
 ]
+
+
+async def _dispatch(srv: RegisteredServer, tool_name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
+    """Route a tool call to a discovered or external server using its configured URL/headers."""
+    url = srv.endpoint_url()
+    headers = dict(srv.headers) if srv.headers else build_auth_headers(srv.auth)
+    return await call_remote_tool(url, headers, tool_name, arguments)
 
 
 def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
@@ -140,7 +147,7 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
                     isError=True,
                 )
             srv, original_name = resolved
-            return await call_remote_tool(srv.ip, srv.port, original_name, tool_args, srv.path, srv.auth)
+            return await _dispatch(srv, original_name, tool_args)
 
         # Hybrid: direct tool call
         resolved = registry.resolve_tool(name)
@@ -150,7 +157,7 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
                 isError=True,
             )
         srv, tool_name = resolved
-        return await call_remote_tool(srv.ip, srv.port, tool_name, arguments, srv.path, srv.auth)
+        return await _dispatch(srv, tool_name, arguments)
 
     session_manager = StreamableHTTPSessionManager(app=server, stateless=True)
     return session_manager

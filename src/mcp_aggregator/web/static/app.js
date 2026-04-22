@@ -22,6 +22,16 @@ async function fetchStatus() {
     }
 }
 
+async function fetchExternal() {
+    try {
+        const res = await fetch("/api/external");
+        const configs = await res.json();
+        renderExternal(configs);
+    } catch (e) {
+        console.error("Failed to fetch external servers:", e);
+    }
+}
+
 function deriveMcpName(publicUrl) {
     try {
         return new URL(publicUrl).hostname.replace(/\./g, "-");
@@ -84,14 +94,24 @@ function renderServers(servers) {
         container.innerHTML = '<p class="empty">No servers discovered yet.</p>';
         return;
     }
-    container.innerHTML = servers.map(s => `
+    container.innerHTML = servers.map(s => {
+        const endpoint = s.url || `http://${s.ip}:${s.port}${s.path || "/mcp"}`;
+        const originTag = s.origin === "external"
+            ? '<span class="badge badge-external" title="Added manually via /api/external">external</span>'
+            : '<span class="badge badge-discovered" title="Discovered via UDP">discovered</span>';
+        const errorBanner = s.error
+            ? `<p class="server-error">⚠ ${esc(s.error)}</p>`
+            : "";
+        return `
         <details class="server-card">
             <summary class="server-header">
                 <span class="server-name">${esc(s.name)}</span>
+                ${originTag}
                 ${s.description ? `<span class="server-desc">${esc(s.description)}</span>` : ""}
                 <span class="server-tool-count">${s.tools.length} tool${s.tools.length !== 1 ? "s" : ""}</span>
             </summary>
             <div class="server-body">
+                ${errorBanner}
                 <div class="tools-list">
                     ${s.tools.map(t => renderTool(t, s.name)).join("")}
                 </div>
@@ -99,16 +119,18 @@ function renderServers(servers) {
                     <summary>Technical Details</summary>
                     <div class="details-content">
                         <table class="details-table">
-                            <tr><td class="details-label">IP</td><td><code>${esc(s.ip)}</code></td></tr>
-                            <tr><td class="details-label">Endpoint</td><td><code>http://${esc(s.ip)}:${s.port}${esc(s.path || "/mcp")}</code></td></tr>
+                            <tr><td class="details-label">Origin</td><td>${esc(s.origin || "discovery")}</td></tr>
+                            <tr><td class="details-label">Endpoint</td><td><code>${esc(endpoint)}</code></td></tr>
                             <tr><td class="details-label">Namespaced as</td><td><code>${esc(s.name)}__*</code></td></tr>
+                            <tr><td class="details-label">Authenticated</td><td>${s.authenticated ? "yes" : "no"}</td></tr>
                             <tr><td class="details-label">Last seen</td><td>${formatTimestamp(s.last_seen)}</td></tr>
                         </table>
                     </div>
                 </details>
             </div>
         </details>
-    `).join("");
+    `;
+    }).join("");
 }
 
 function renderTool(tool, serverName) {
@@ -154,6 +176,94 @@ function renderTool(tool, serverName) {
     `;
 }
 
+function renderExternal(configs) {
+    const list = document.getElementById("external-list");
+    if (!configs.length) {
+        list.innerHTML = '<p class="empty">No external servers configured.</p>';
+        return;
+    }
+    list.innerHTML = configs.map(c => `
+        <div class="external-row">
+            <div class="external-info">
+                <span class="external-name">${esc(c.name)}</span>
+                <code class="external-url">${esc(c.url)}</code>
+                ${c.header_keys.length
+                    ? `<span class="external-headers" title="${esc(c.header_keys.join(", "))}">${c.header_keys.length} header${c.header_keys.length === 1 ? "" : "s"}</span>`
+                    : ""}
+            </div>
+            <button class="external-delete" onclick="deleteExternal('${esc(c.name)}')" title="Remove">Remove</button>
+        </div>
+    `).join("");
+}
+
+async function addExternal() {
+    const btn = document.getElementById("external-add-btn");
+    const feedback = document.getElementById("external-feedback");
+    const textarea = document.getElementById("external-json");
+    feedback.textContent = "";
+    feedback.className = "external-feedback";
+
+    const raw = textarea.value.trim();
+    if (!raw) {
+        feedback.textContent = "Paste a JSON config first.";
+        feedback.classList.add("error");
+        return;
+    }
+
+    let payload;
+    try {
+        payload = JSON.parse(raw);
+    } catch (e) {
+        feedback.textContent = `Invalid JSON: ${e.message}`;
+        feedback.classList.add("error");
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Adding...";
+    try {
+        const res = await fetch("/api/external", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            feedback.textContent = data.error || `HTTP ${res.status}`;
+            feedback.classList.add("error");
+            return;
+        }
+        const parts = data.added.map(a =>
+            a.error ? `${a.name} (error: ${a.error})` : `${a.name} (${a.tools} tools)`
+        );
+        feedback.textContent = `Added: ${parts.join(", ")}`;
+        feedback.classList.add(data.added.some(a => a.error) ? "error" : "success");
+        textarea.value = "";
+        await Promise.all([fetchExternal(), fetchServers(), fetchStatus()]);
+    } catch (e) {
+        feedback.textContent = `Error: ${e.message}`;
+        feedback.classList.add("error");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Add";
+    }
+}
+
+async function deleteExternal(name) {
+    if (!confirm(`Remove external server "${name}"?`)) return;
+    try {
+        const res = await fetch(`/api/external/${encodeURIComponent(name)}`, { method: "DELETE" });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || `HTTP ${res.status}`);
+            return;
+        }
+        await Promise.all([fetchExternal(), fetchServers(), fetchStatus()]);
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
 function formatTimestamp(ts) {
     if (!ts) return "unknown";
     const d = new Date(ts * 1000);
@@ -172,6 +282,7 @@ async function triggerDiscovery() {
         await fetch("/api/discover", { method: "POST" });
         await fetchServers();
         await fetchStatus();
+        await fetchExternal();
     } finally {
         btn.disabled = false;
         btn.textContent = "Refresh Discovery";
@@ -201,3 +312,4 @@ function esc(str) {
 // Initial load
 fetchServers();
 fetchStatus();
+fetchExternal();

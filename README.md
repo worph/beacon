@@ -68,6 +68,30 @@ An MCP server needs two things to work with Beacon:
 
 SDKs are provided for both Python and Node.js (see `sdk/`) — adding discovery to an existing MCP server is ~5 lines of code.
 
+### External (non-Beacon-ready) MCP Servers
+
+Not every MCP server you want to use is going to run in your Docker network with the Beacon SDK embedded — many are SaaS-hosted HTTP endpoints (n8n, Zapier, hosted GitHub MCP, etc.).
+
+Beacon supports these as **external servers**. Instead of discovery, Beacon connects to them directly over MCP streamable HTTP using a URL + optional headers, polls `list_tools`, and proxies calls through the same `call` meta-tool as discovered servers. Configs are persisted to disk so they survive restarts.
+
+**Add via the Web UI** — expand **External MCP Servers** and paste a Claude Desktop `mcpServers` bundle:
+
+```json
+{
+  "mcpServers": {
+    "n8n-mcp": {
+      "type": "http",
+      "url": "https://n8n.example.com/mcp-server/http",
+      "headers": {
+        "Authorization": "Bearer eyJ..."
+      }
+    }
+  }
+}
+```
+
+**Or via the REST API** — `POST /api/external` with the same JSON, or with a single `{"name": ..., "url": ..., "headers": {...}}` object. `GET /api/external` lists configured servers (header *values* are redacted, only key names are returned). `DELETE /api/external/{name}` removes one.
+
 ### Docker Networking
 
 All services must be on the same Docker bridge network. Create the shared network before starting any stack:
