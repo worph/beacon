@@ -11,10 +11,41 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from mcp_aggregator.mcp_client import build_auth_headers, call_remote_tool
+from mcp_aggregator.mcp_client import _USE_DEFAULT, build_auth_headers, call_remote_tool
 from mcp_aggregator.registry import RegisteredServer, Registry
 
 logger = logging.getLogger(__name__)
+
+# Reserved argument key: an optional per-call timeout override (in seconds) that beacon
+# strips before forwarding to the remote tool. Absent → global default; 0 → no timeout;
+# > 0 → that many seconds. Works on both the `call` meta-tool and direct tool calls.
+RESERVED_TIMEOUT_KEY = "__beacon_timeout"
+
+
+def pop_timeout(arguments: dict[str, Any] | None) -> tuple[Any, dict[str, Any] | None]:
+    """Pop RESERVED_TIMEOUT_KEY out of a tool's arguments.
+
+    Returns (timeout, cleaned_arguments) where timeout is:
+      - _USE_DEFAULT  → no override present (use the global default)
+      - None          → explicit "no timeout" (__beacon_timeout == 0)
+      - float (> 0)   → that many seconds
+    Invalid/negative values are ignored (treated as no override).
+    """
+    if not isinstance(arguments, dict) or RESERVED_TIMEOUT_KEY not in arguments:
+        return _USE_DEFAULT, arguments
+    cleaned = dict(arguments)
+    raw = cleaned.pop(RESERVED_TIMEOUT_KEY)
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("Ignoring non-numeric %s=%r", RESERVED_TIMEOUT_KEY, raw)
+        return _USE_DEFAULT, cleaned
+    if val == 0:
+        return None, cleaned  # explicit no-timeout
+    if val < 0:
+        logger.warning("Ignoring negative %s=%r", RESERVED_TIMEOUT_KEY, raw)
+        return _USE_DEFAULT, cleaned
+    return val, cleaned
 
 META_TOOLS = [
     types.Tool(
@@ -52,7 +83,11 @@ META_TOOLS = [
     ),
     types.Tool(
         name="call",
-        description="Call a tool on a discovered MCP server.",
+        description=(
+            "Call a tool on a discovered MCP server. To override the timeout for a single "
+            "call, include '__beacon_timeout' (seconds) inside 'arguments': 0 means no "
+            "timeout, a positive number sets that many seconds; omit it for the default."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
@@ -62,7 +97,11 @@ META_TOOLS = [
                 },
                 "arguments": {
                     "type": "object",
-                    "description": "Arguments to pass to the tool",
+                    "description": (
+                        "Arguments to pass to the tool. May include the reserved key "
+                        "'__beacon_timeout' (seconds; 0 = no timeout) which beacon strips "
+                        "before forwarding."
+                    ),
                     "additionalProperties": True,
                 },
             },
@@ -72,11 +111,19 @@ META_TOOLS = [
 ]
 
 
-async def _dispatch(srv: RegisteredServer, tool_name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
+async def _dispatch(
+    srv: RegisteredServer,
+    tool_name: str,
+    arguments: dict[str, Any] | None,
+    timeout: Any = _USE_DEFAULT,
+    display_name: str | None = None,
+) -> types.CallToolResult:
     """Route a tool call to a discovered or external server using its configured URL/headers."""
     url = srv.endpoint_url()
     headers = dict(srv.headers) if srv.headers else build_auth_headers(srv.auth)
-    return await call_remote_tool(url, headers, tool_name, arguments)
+    return await call_remote_tool(
+        url, headers, tool_name, arguments, timeout=timeout, display_name=display_name
+    )
 
 
 def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
@@ -147,7 +194,8 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
                     isError=True,
                 )
             srv, original_name = resolved
-            return await _dispatch(srv, original_name, tool_args)
+            timeout, tool_args = pop_timeout(tool_args)
+            return await _dispatch(srv, original_name, tool_args, timeout, display_name=tool_name)
 
         # Hybrid: direct tool call
         resolved = registry.resolve_tool(name)
@@ -157,7 +205,8 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
                 isError=True,
             )
         srv, tool_name = resolved
-        return await _dispatch(srv, tool_name, arguments)
+        timeout, arguments = pop_timeout(arguments)
+        return await _dispatch(srv, tool_name, arguments, timeout, display_name=name)
 
     session_manager = StreamableHTTPSessionManager(app=server, stateless=True)
     return session_manager
