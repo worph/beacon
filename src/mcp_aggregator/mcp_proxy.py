@@ -134,6 +134,18 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
         instructions=registry.get_instructions(),
     )
 
+    # The SDK reads `server.instructions` when it builds the InitializationOptions
+    # for each request (create_initialization_options is called per request). Refresh
+    # it there so the `initialize` response always reflects the current registry +
+    # user annotations, instead of a snapshot taken at construction time.
+    _orig_init_opts = server.create_initialization_options
+
+    def _init_opts(*args, **kwargs):
+        server.instructions = registry.get_instructions()
+        return _orig_init_opts(*args, **kwargs)
+
+    server.create_initialization_options = _init_opts
+
     @server.list_tools()
     async def handle_list_tools() -> list[types.Tool]:
         server.instructions = registry.get_instructions()

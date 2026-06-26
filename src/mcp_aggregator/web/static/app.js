@@ -94,11 +94,18 @@ function renderServers(servers) {
         container.innerHTML = '<p class="empty">No servers discovered yet.</p>';
         return;
     }
-    container.innerHTML = servers.map(s => {
+    container.innerHTML = servers.map((s, i) => {
         const endpoint = s.url || `http://${s.ip}:${s.port}${s.path || "/mcp"}`;
         const originTag = s.origin === "external"
             ? '<span class="badge badge-external" title="Added manually via /api/external">external</span>'
             : '<span class="badge badge-discovered" title="Discovered via UDP">discovered</span>';
+        const override = s.description_override || "";
+        const note = s.note || "";
+        const isCustom = !!override || !!note;
+        const effectiveDesc = override || s.description || "";
+        const customTag = isCustom
+            ? '<span class="badge badge-custom" title="Customized in the UI">custom</span>'
+            : "";
         const errorBanner = s.error
             ? `<p class="server-error">⚠ ${esc(s.error)}</p>`
             : "";
@@ -107,11 +114,37 @@ function renderServers(servers) {
             <summary class="server-header">
                 <span class="server-name">${esc(s.name)}</span>
                 ${originTag}
-                ${s.description ? `<span class="server-desc">${esc(s.description)}</span>` : ""}
+                ${customTag}
+                ${effectiveDesc ? `<span class="server-desc">${esc(effectiveDesc)}</span>` : ""}
                 <span class="server-tool-count">${s.tools.length} tool${s.tools.length !== 1 ? "s" : ""}</span>
             </summary>
             <div class="server-body">
                 ${errorBanner}
+                <div class="server-doc-preview">
+                    <button class="info-btn" onclick="toggleServerDoc(${i})"
+                        title="Show the exact server_doc the LLM receives for this server">ⓘ Show server_doc</button>
+                    <pre id="server-doc-${i}" class="doc-render" data-name="${escAttr(s.name)}" style="display:none"></pre>
+                </div>
+                <div class="server-annotate">
+                    <label class="annotate-label" for="annotate-text-${i}">Description shown to the LLM (replaces the discovered one)</label>
+                    <textarea id="annotate-text-${i}" class="annotate-text" rows="3" spellcheck="false"
+                        data-name="${escAttr(s.name)}" data-default="${escAttr(s.description || "")}">${esc(effectiveDesc)}</textarea>
+                    <div class="annotate-actions">
+                        <button onclick="saveAnnotation(${i})">Save</button>
+                        <button id="annotate-restore-${i}" onclick="restoreAnnotation(${i})"${override ? "" : " disabled"}>Restore default</button>
+                        <span id="annotate-fb-${i}" class="annotate-feedback"></span>
+                    </div>
+                </div>
+                <div class="server-annotate">
+                    <label class="annotate-label" for="note-text-${i}">Extra docs — added to <code>server_doc</code> (drill-down only)</label>
+                    <textarea id="note-text-${i}" class="annotate-text" rows="3" spellcheck="false"
+                        data-name="${escAttr(s.name)}" placeholder="Optional. e.g. read https://…/start-here first; page titles follow <area>/<topic>.">${esc(note)}</textarea>
+                    <div class="annotate-actions">
+                        <button onclick="saveNote(${i})">Save</button>
+                        <button id="note-clear-${i}" onclick="clearNote(${i})"${note ? "" : " disabled"}>Clear</button>
+                        <span id="note-fb-${i}" class="annotate-feedback"></span>
+                    </div>
+                </div>
                 <div class="tools-list">
                     ${s.tools.map(t => renderTool(t, s.name)).join("")}
                 </div>
@@ -264,6 +297,152 @@ async function deleteExternal(name) {
     }
 }
 
+function setAnnotateFeedback(el, text, cls) {
+    el.textContent = text;
+    el.className = "annotate-feedback" + (cls ? " " + cls : "");
+}
+
+// Shared PUT helper for the per-server annotation endpoint. `body` is the
+// JSON object to send ({description} or {note}); returns parsed data or throws.
+async function putAnnotation(name, body) {
+    const res = await fetch(`/api/annotations/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+}
+
+async function saveAnnotation(i) {
+    const ta = document.getElementById(`annotate-text-${i}`);
+    const fb = document.getElementById(`annotate-fb-${i}`);
+    const restoreBtn = document.getElementById(`annotate-restore-${i}`);
+    setAnnotateFeedback(fb, "");
+    try {
+        const data = await putAnnotation(ta.dataset.name, { description: ta.value });
+        if (!data.description) {
+            ta.value = ta.dataset.default || "";
+            if (restoreBtn) restoreBtn.disabled = true;
+            setAnnotateFeedback(fb, "Empty — default restored", "success");
+        } else {
+            if (restoreBtn) restoreBtn.disabled = false;
+            setAnnotateFeedback(fb, "Saved", "success");
+        }
+        fetchStatus();
+    } catch (e) {
+        setAnnotateFeedback(fb, e.message, "error");
+    }
+}
+
+async function restoreAnnotation(i) {
+    const ta = document.getElementById(`annotate-text-${i}`);
+    const fb = document.getElementById(`annotate-fb-${i}`);
+    const restoreBtn = document.getElementById(`annotate-restore-${i}`);
+    try {
+        // Clear only the description (empty string), leaving any server note intact.
+        await putAnnotation(ta.dataset.name, { description: "" });
+        ta.value = ta.dataset.default || "";
+        if (restoreBtn) restoreBtn.disabled = true;
+        setAnnotateFeedback(fb, "Default restored", "success");
+        fetchStatus();
+    } catch (e) {
+        setAnnotateFeedback(fb, e.message, "error");
+    }
+}
+
+async function saveNote(i) {
+    const ta = document.getElementById(`note-text-${i}`);
+    const fb = document.getElementById(`note-fb-${i}`);
+    const clearBtn = document.getElementById(`note-clear-${i}`);
+    setAnnotateFeedback(fb, "");
+    try {
+        const data = await putAnnotation(ta.dataset.name, { note: ta.value });
+        if (!data.note) {
+            ta.value = "";
+            if (clearBtn) clearBtn.disabled = true;
+            setAnnotateFeedback(fb, "Empty — cleared", "success");
+        } else {
+            if (clearBtn) clearBtn.disabled = false;
+            setAnnotateFeedback(fb, "Saved", "success");
+        }
+        fetchStatus();
+    } catch (e) {
+        setAnnotateFeedback(fb, e.message, "error");
+    }
+}
+
+async function clearNote(i) {
+    const ta = document.getElementById(`note-text-${i}`);
+    const fb = document.getElementById(`note-fb-${i}`);
+    const clearBtn = document.getElementById(`note-clear-${i}`);
+    try {
+        await putAnnotation(ta.dataset.name, { note: "" });
+        ta.value = "";
+        if (clearBtn) clearBtn.disabled = true;
+        setAnnotateFeedback(fb, "Cleared", "success");
+        fetchStatus();
+    } catch (e) {
+        setAnnotateFeedback(fb, e.message, "error");
+    }
+}
+
+async function fetchInstructionsNote() {
+    try {
+        const res = await fetch("/api/instructions-note");
+        const data = await res.json();
+        const ta = document.getElementById("instructions-note");
+        if (ta) ta.value = data.note || "";
+        const clearBtn = document.getElementById("instructions-note-clear");
+        if (clearBtn) clearBtn.disabled = !data.note;
+    } catch (e) {
+        console.error("Failed to fetch instructions note:", e);
+    }
+}
+
+async function saveInstructionsNote() {
+    const ta = document.getElementById("instructions-note");
+    const fb = document.getElementById("instructions-note-fb");
+    const clearBtn = document.getElementById("instructions-note-clear");
+    setAnnotateFeedback(fb, "");
+    try {
+        const res = await fetch("/api/instructions-note", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note: ta.value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            setAnnotateFeedback(fb, data.error || `HTTP ${res.status}`, "error");
+            return;
+        }
+        ta.value = data.note || "";
+        if (clearBtn) clearBtn.disabled = !data.note;
+        setAnnotateFeedback(fb, data.cleared ? "Empty — cleared" : "Saved", "success");
+    } catch (e) {
+        setAnnotateFeedback(fb, `Error: ${e.message}`, "error");
+    }
+}
+
+async function clearInstructionsNote() {
+    const ta = document.getElementById("instructions-note");
+    const fb = document.getElementById("instructions-note-fb");
+    const clearBtn = document.getElementById("instructions-note-clear");
+    try {
+        await fetch("/api/instructions-note", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ note: "" }),
+        });
+        ta.value = "";
+        if (clearBtn) clearBtn.disabled = true;
+        setAnnotateFeedback(fb, "Cleared", "success");
+    } catch (e) {
+        setAnnotateFeedback(fb, `Error: ${e.message}`, "error");
+    }
+}
+
 function formatTimestamp(ts) {
     if (!ts) return "unknown";
     const d = new Date(ts * 1000);
@@ -309,7 +488,94 @@ function esc(str) {
     return d.innerHTML;
 }
 
+// Like esc() but also safe inside double-quoted HTML attributes.
+function escAttr(str) {
+    return esc(str).replace(/"/g, "&quot;");
+}
+
+// Toggle the exact server_doc render the LLM receives for a server.
+async function toggleServerDoc(i) {
+    const pre = document.getElementById(`server-doc-${i}`);
+    if (!pre) return;
+    if (pre.style.display !== "none") { pre.style.display = "none"; return; }
+    pre.textContent = "Loading…";
+    pre.style.display = "";
+    try {
+        const res = await fetch(`/api/servers/${encodeURIComponent(pre.dataset.name)}/doc`);
+        const data = await res.json();
+        pre.textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+        pre.textContent = `Error: ${e.message}`;
+    }
+}
+
+// Toggle a preview of the live top-level instructions next to the editor.
+async function toggleInstructionsRender() {
+    const pre = document.getElementById("instructions-render-preview");
+    if (!pre) return;
+    if (pre.style.display !== "none") { pre.style.display = "none"; return; }
+    pre.textContent = "Loading…";
+    pre.style.display = "";
+    try {
+        const res = await fetch("/api/beacon-info");
+        const data = await res.json();
+        pre.textContent = data.instructions || "(empty)";
+    } catch (e) {
+        pre.textContent = `Error: ${e.message}`;
+    }
+}
+
+async function fetchBeaconInfo() {
+    try {
+        const res = await fetch("/api/beacon-info");
+        const data = await res.json();
+        const instr = document.getElementById("beacon-instructions-render");
+        if (instr) instr.textContent = data.instructions || "(empty)";
+        const tools = document.getElementById("beacon-tools-render");
+        if (tools) tools.innerHTML = (data.tools || []).map(renderMetaTool).join("");
+    } catch (e) {
+        console.error("Failed to fetch beacon info:", e);
+    }
+}
+
+// Like renderTool but for Beacon's own meta-tools (no server namespace).
+function renderMetaTool(tool) {
+    const schema = tool.inputSchema || {};
+    const props = schema.properties || {};
+    const required = schema.required || [];
+    const paramNames = Object.keys(props);
+    return `
+        <details class="tool-detail">
+            <summary class="tool-tag tool-tag-expandable">${esc(tool.name)}</summary>
+            <div class="tool-info">
+                ${tool.description ? `<p class="tool-desc">${esc(tool.description)}</p>` : ""}
+                ${paramNames.length > 0 ? `
+                    <div class="tool-params">
+                        <span class="params-label">Parameters</span>
+                        <table class="params-table">
+                            <thead><tr><th>Name</th><th>Type</th><th>Description</th></tr></thead>
+                            <tbody>
+                                ${paramNames.map(name => {
+                                    const p = props[name];
+                                    const isReq = required.includes(name);
+                                    return `<tr>
+                                        <td><code>${esc(name)}</code>${isReq ? '<span class="param-required">*</span>' : ""}</td>
+                                        <td class="param-type">${esc(p.type || "any")}</td>
+                                        <td class="param-desc">${p.description ? esc(p.description) : '<span class="no-desc">—</span>'}</td>
+                                    </tr>`;
+                                }).join("")}
+                            </tbody>
+                        </table>
+                    </div>
+                ` : '<p class="hint">No parameters.</p>'}
+            </div>
+        </details>
+    `;
+}
+
 // Initial load
 fetchServers();
 fetchStatus();
 fetchExternal();
+fetchInstructionsNote();
+fetchBeaconInfo();

@@ -22,6 +22,26 @@
             <button id="discover-btn" onclick="triggerDiscovery()">Refresh Discovery</button>
         </section>
 
+        <section class="beacon-note">
+            <details>
+                <summary><h2>Beacon Instructions</h2></summary>
+                <p class="hint">
+                    Optional text added to the top-level <code>instructions</code> every client sees on connect,
+                    shown just before the server list. Use it for aggregator-wide guidance. Empty = nothing added.
+                </p>
+                <textarea id="instructions-note" class="annotate-text" rows="3" spellcheck="false"
+                    placeholder="e.g. This gateway fronts the internal team tools; follow the KB conventions before using them."></textarea>
+                <div class="annotate-actions">
+                    <button onclick="saveInstructionsNote()">Save</button>
+                    <button id="instructions-note-clear" onclick="clearInstructionsNote()">Clear</button>
+                    <button class="info-btn" title="Preview the rendered top-level instructions"
+                        onclick="toggleInstructionsRender()">ⓘ Preview</button>
+                    <span id="instructions-note-fb" class="annotate-feedback"></span>
+                </div>
+                <pre id="instructions-render-preview" class="doc-render" style="display:none"></pre>
+            </details>
+        </section>
+
         <section class="servers">
             <h2>Discovered Servers</h2>
             <div id="servers-container">
@@ -61,6 +81,27 @@
                         <span id="external-feedback" class="external-feedback"></span>
                     </div>
                 </div>
+            </details>
+        </section>
+
+        <section class="beacon-info">
+            <details>
+                <summary><h2>Info</h2></summary>
+                <p class="hint">What Beacon itself exposes to a connected LLM client — independent of the discovered servers.</p>
+
+                <h3>Top-level instructions</h3>
+                <p class="hint">
+                    Returned in the MCP <code>initialize</code> response, before any tool call. This is the live
+                    render (includes the Beacon instructions note and any per-server description overrides).
+                </p>
+                <pre id="beacon-instructions-render" class="doc-render">Loading…</pre>
+
+                <h3>Beacon tools</h3>
+                <p class="hint">
+                    The meta-tools Beacon exposes directly. Everything on a discovered/external server is reached
+                    indirectly through <code>call</code>; these are the only first-class tools (plus any marked <code>direct</code>).
+                </p>
+                <div id="beacon-tools-render"></div>
             </details>
         </section>
 

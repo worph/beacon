@@ -36,9 +36,19 @@ class RegisteredServer:
 class Registry:
     """Stores MCP servers (discovered + external) and provides namespaced tool lookups."""
 
-    def __init__(self) -> None:
+    def __init__(self, annotations=None) -> None:
         self._discovered: dict[str, RegisteredServer] = {}
         self._external: dict[str, RegisteredServer] = {}
+        # Optional AnnotationStore: provides per-server description overrides.
+        self._annotations = annotations
+
+    def describe(self, server: RegisteredServer) -> str:
+        """Effective description for a server: user override if set, else discovered."""
+        if self._annotations is not None:
+            override = self._annotations.get(server.name)
+            if override:
+                return override
+        return server.description
 
     @property
     def servers(self) -> dict[str, RegisteredServer]:
@@ -96,9 +106,13 @@ class Registry:
     def get_instructions(self) -> str:
         """Build server instructions with a one-liner per server."""
         lines = ["Beacon MCP aggregator. Call server_doc with a server name to get full tool schemas for that server.", ""]
+        note = self._annotations.get_instructions_note() if self._annotations is not None else ""
+        if note:
+            lines.append(note)
+            lines.append("")
         lines.append("Available servers:")
         for server in self.servers.values():
-            lines.append(f"- {server.name} — {server.description}")
+            lines.append(f"- {server.name} — {self.describe(server)}")
         return "\n".join(lines)
 
     def get_overview_text(self) -> str:
@@ -106,7 +120,7 @@ class Registry:
         lines: list[str] = []
         for server in self.servers.values():
             lines.append(f"## {server.name}")
-            lines.append(server.description)
+            lines.append(self.describe(server))
             for tool in server.tools:
                 namespaced = f"{server.name}{NAMESPACE_SEP}{tool['name']}"
                 desc = tool.get("description", "")
@@ -125,7 +139,7 @@ class Registry:
                 doc = tool.copy()
                 doc["name"] = namespaced_name
                 doc["server"] = server.name
-                doc["server_description"] = server.description
+                doc["server_description"] = self.describe(server)
                 return doc
         return None
 
@@ -139,11 +153,17 @@ class Registry:
             doc = tool.copy()
             doc["name"] = f"{server.name}{NAMESPACE_SEP}{tool['name']}"
             tools.append(doc)
-        return {
+        doc = {
             "server": server.name,
-            "description": server.description,
-            "tools": tools,
+            "description": self.describe(server),
         }
+        # Optional user-supplied note, placed before the schemas so the LLM
+        # reads it first. Kept out of the compact overview on purpose.
+        note = self._annotations.get_note(server.name) if self._annotations is not None else None
+        if note:
+            doc["notes"] = note
+        doc["tools"] = tools
+        return doc
 
     def get_direct_tools(self) -> list[dict]:
         """Return namespaced tool dicts for tools marked as direct."""

@@ -11,11 +11,11 @@ services:
       - DISCOVERY_PORT=9099
       - WEB_PORT=9300
       - LOG_LEVEL=info
-      # Where external MCP server configs are persisted (file mounted via `data:`)
-      - EXTERNAL_CONFIG_PATH=/app/data/external.json
       - EXTERNAL_POLL_INTERVAL=60
     volumes:
-      - beacon-data:/app/data
+      # Persisted state (external.json, annotations.json) — bind-mounted so it's
+      # visible on the host. Paths default to /app/data/* inside the container.
+      - ./data:/app/data
     networks:
       - mcp-net
 
@@ -43,6 +43,3 @@ services:
 networks:
   mcp-net:
     external: true
-
-volumes:
-  beacon-data:

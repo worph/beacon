@@ -10,9 +10,10 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
+from mcp_aggregator.annotations import AnnotationStore
 from mcp_aggregator.discovery import run_discovery
 from mcp_aggregator.external import ExternalConfig, ExternalManager
-from mcp_aggregator.mcp_proxy import create_mcp_session_manager
+from mcp_aggregator.mcp_proxy import META_TOOLS, create_mcp_session_manager
 from mcp_aggregator.registry import Registry
 
 logger = logging.getLogger(__name__)
@@ -20,10 +21,15 @@ logger = logging.getLogger(__name__)
 _start_time = time.time()
 
 
-def _server_dict(s) -> dict:
+def _server_dict(s, override: str | None = None, note: str | None = None) -> dict:
     return {
         "name": s.name,
+        # `description` is always the discovered/external default (the restore baseline);
+        # `description_override` is the user-supplied text in effect, or None.
         "description": s.description,
+        "description_override": override,
+        # `note` is optional extra text injected into this server's server_doc.
+        "note": note,
         "ip": s.ip,
         "port": s.port,
         "path": s.path,
@@ -79,6 +85,7 @@ def _parse_external_payload(payload: dict) -> list[ExternalConfig]:
 def create_web_app(
     registry: Registry,
     external_manager: ExternalManager,
+    annotations: AnnotationStore,
     discovery_port: int = 9099,
     public_url: str | None = None,
     auth_hash: str | None = None,
@@ -94,14 +101,38 @@ def create_web_app(
 
     @app.get("/api/servers")
     async def list_servers():
-        return [_server_dict(s) for s in registry.servers.values()]
+        return [
+            _server_dict(s, annotations.get(s.name), annotations.get_note(s.name))
+            for s in registry.servers.values()
+        ]
 
     @app.get("/api/servers/{name}")
     async def get_server(name: str):
         server = registry.servers.get(name)
         if server is None:
             return JSONResponse({"error": "Server not found"}, status_code=404)
-        return _server_dict(server)
+        return _server_dict(server, annotations.get(server.name), annotations.get_note(server.name))
+
+    @app.get("/api/servers/{name}/doc")
+    async def get_server_doc(name: str):
+        # The exact object the `server_doc` meta-tool returns to the LLM for this
+        # server (description override + note applied), for the UI "i" preview.
+        doc = registry.get_server_doc(name)
+        if doc is None:
+            return JSONResponse({"error": "Server not found"}, status_code=404)
+        return doc
+
+    @app.get("/api/beacon-info")
+    async def beacon_info():
+        # What Beacon itself exposes: the top-level instructions string returned in
+        # the MCP initialize response, plus the meta-tools exposed directly.
+        return {
+            "instructions": registry.get_instructions(),
+            "tools": [
+                {"name": t.name, "description": t.description, "inputSchema": t.inputSchema}
+                for t in META_TOOLS
+            ],
+        }
 
     @app.post("/api/discover")
     async def trigger_discovery():
@@ -163,6 +194,61 @@ def create_web_app(
     async def refresh_external():
         await external_manager.refresh_all()
         return {"refreshed": len(external_manager.configs)}
+
+    @app.get("/api/annotations")
+    async def list_annotations():
+        return {
+            "instructions_note": annotations.get_instructions_note(),
+            "descriptions": annotations.all(),
+            "server_notes": annotations.all_notes(),
+        }
+
+    @app.get("/api/instructions-note")
+    async def get_instructions_note():
+        return {"note": annotations.get_instructions_note()}
+
+    @app.put("/api/instructions-note")
+    async def set_instructions_note(request: Request):
+        try:
+            payload = await request.json()
+        except Exception as e:
+            return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
+        note = payload.get("note") if isinstance(payload, dict) else None
+        if not isinstance(note, str) and note is not None:
+            return JSONResponse({"error": "`note` must be a string"}, status_code=400)
+        active = annotations.set_instructions_note(note or "")
+        return {"note": annotations.get_instructions_note(), "cleared": not active}
+
+    @app.put("/api/annotations/{name}")
+    async def set_annotation(name: str, request: Request):
+        try:
+            payload = await request.json()
+        except Exception as e:
+            return JSONResponse({"error": f"Invalid JSON: {e}"}, status_code=400)
+        if not isinstance(payload, dict) or ("description" not in payload and "note" not in payload):
+            return JSONResponse(
+                {"error": "Body must include `description` and/or `note`"}, status_code=400
+            )
+        if "description" in payload:
+            description = payload.get("description") or ""
+            if not isinstance(description, str):
+                return JSONResponse({"error": "`description` must be a string"}, status_code=400)
+            annotations.set(name, description)
+        if "note" in payload:
+            note = payload.get("note") or ""
+            if not isinstance(note, str):
+                return JSONResponse({"error": "`note` must be a string"}, status_code=400)
+            annotations.set_note(name, note)
+        return {
+            "name": name,
+            "description": annotations.get(name) or "",
+            "note": annotations.get_note(name) or "",
+        }
+
+    @app.delete("/api/annotations/{name}")
+    async def delete_annotation(name: str):
+        annotations.remove(name)
+        return {"restored": name}
 
     @app.get("/api/status")
     async def status():

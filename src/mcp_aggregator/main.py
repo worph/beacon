@@ -6,6 +6,7 @@ import os
 
 import uvicorn
 
+from mcp_aggregator.annotations import AnnotationStore
 from mcp_aggregator.discovery import run_discovery
 from mcp_aggregator.external import ExternalManager
 from mcp_aggregator.registry import Registry
@@ -47,7 +48,10 @@ async def main() -> None:
     public_url = os.environ.get("PUBLIC_URL") or None
     auth_hash = os.environ.get("AUTH_HASH") or None
 
-    registry = Registry()
+    annotations = AnnotationStore()
+    annotations.load()
+    logger.info("Loaded %d description override(s)", len(annotations.all()))
+    registry = Registry(annotations=annotations)
 
     external_manager = ExternalManager(registry)
     external_manager.load()
@@ -65,6 +69,7 @@ async def main() -> None:
     web_app = create_web_app(
         registry,
         external_manager,
+        annotations,
         discovery_port=discovery_port,
         public_url=public_url,
         auth_hash=auth_hash,
