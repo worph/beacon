@@ -15,7 +15,7 @@ async function fetchStatus() {
         document.getElementById("status-text").textContent =
             `${data.servers} server(s) | ${data.tools} tool(s) | uptime ${formatUptime(data.uptime_seconds)}`;
         if (data.hostname && data.port) {
-            updateConnectionInfo(data.hostname, data.port, data.public_url, data.auth_hash);
+            updateConnectionInfo(data.hostname, data.port, data.public_url, data.auth_hash, data.oauth_admin_url);
         }
     } catch (e) {
         document.getElementById("status-text").textContent = "Disconnected";
@@ -40,9 +40,20 @@ function deriveMcpName(publicUrl) {
     }
 }
 
-function updateConnectionInfo(hostname, port, publicUrl, authHash) {
+function updateConnectionInfo(hostname, port, publicUrl, authHash, oauthAdminUrl) {
     const remoteBlock = document.getElementById("remote-setup");
     const localBlock = document.getElementById("local-setup");
+
+    // Optional "Manage remote access" link — shown only when an admin URL is configured.
+    const oauthLink = document.getElementById("oauth-admin-link");
+    if (oauthLink) {
+        if (oauthAdminUrl) {
+            oauthLink.href = oauthAdminUrl;
+            oauthLink.style.display = "";
+        } else {
+            oauthLink.style.display = "none";
+        }
+    }
 
     if (publicUrl) {
         const remoteUrl = authHash

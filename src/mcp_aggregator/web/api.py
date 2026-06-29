@@ -89,6 +89,7 @@ def create_web_app(
     discovery_port: int = 9099,
     public_url: str | None = None,
     auth_hash: str | None = None,
+    oauth_admin_url: str | None = None,
 ) -> FastAPI:
     session_manager = create_mcp_session_manager(registry)
 
@@ -261,6 +262,7 @@ def create_web_app(
             "port": web_port,
             "public_url": public_url,
             "auth_hash": auth_hash,
+            "oauth_admin_url": oauth_admin_url,
             "uptime_seconds": round(time.time() - _start_time, 1),
             "servers": len(registry.servers),
             "tools": total_tools,

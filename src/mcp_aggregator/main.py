@@ -47,6 +47,7 @@ async def main() -> None:
     mcp_url = os.environ.get("MCP_URL", f"http://beacon:{web_port}/mcp")
     public_url = os.environ.get("PUBLIC_URL") or None
     auth_hash = os.environ.get("AUTH_HASH") or None
+    oauth_admin_url = os.environ.get("OAUTH_ADMIN_URL") or None
 
     annotations = AnnotationStore()
     annotations.load()
@@ -73,6 +74,7 @@ async def main() -> None:
         discovery_port=discovery_port,
         public_url=public_url,
         auth_hash=auth_hash,
+        oauth_admin_url=oauth_admin_url,
     )
     web_config = uvicorn.Config(web_app, host="0.0.0.0", port=web_port, log_level=log_level.lower())
     web_server = uvicorn.Server(web_config)
