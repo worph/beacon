@@ -58,14 +58,17 @@ async def main() -> None:
     external_manager.load()
     logger.info("Loaded %d external server config(s)", len(external_manager.configs))
 
-    # Initial discovery + initial external poll
+    # Initial discovery so locally-discovered servers are available immediately.
+    # NOTE: external servers are deliberately NOT polled here. A slow or
+    # misbehaving external endpoint (e.g. one that returns no valid MCP response)
+    # would otherwise block startup and prevent the web server from ever binding
+    # :3000. They are pre-registered as stubs by external_manager.load() above and
+    # refreshed in the background by external_loop() in the gather() below.
     logger.info("Running initial discovery...")
     logger.info("Beacon MCP URL: %s", mcp_url)
     responses = await run_discovery(port=discovery_port, mcp_url=mcp_url)
     registry.update_from_discovery(responses)
     logger.info("Found %d discovered server(s)", len(responses))
-
-    await external_manager.refresh_all()
 
     web_app = create_web_app(
         registry,
