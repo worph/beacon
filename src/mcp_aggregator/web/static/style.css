@@ -480,6 +480,48 @@ button#discover-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     }
 }
 
+.badge-federated {
+    background: #ede9fe;
+    color: #5b21b6;
+}
+
+.badge-oauth-ok {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.badge-oauth-need {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.badge-oauth-wait {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+@media (prefers-color-scheme: dark) {
+    .badge-federated {
+        background: #2e1065;
+        color: #c4b5fd;
+    }
+
+    .badge-oauth-ok {
+        background: #052e16;
+        color: #86efac;
+    }
+
+    .badge-oauth-need {
+        background: #450a0a;
+        color: #fca5a5;
+    }
+
+    .badge-oauth-wait {
+        background: #422006;
+        color: #fbbf24;
+    }
+}
+
 /* Beacon-level instructions note panel */
 .beacon-note {
     margin: 1rem 0;
@@ -769,7 +811,21 @@ button#discover-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     border-radius: 10px;
 }
 
-.external-delete {
+.external-err {
+    font-size: 0.8rem;
+    color: #b45309;
+    cursor: help;
+}
+
+.external-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+}
+
+.external-delete,
+.external-auth {
     background: none;
     border: 1px solid var(--border);
     color: var(--fg2);
@@ -782,6 +838,58 @@ button#discover-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 .external-delete:hover {
     color: #b91c1c;
     border-color: #b91c1c;
+}
+
+.external-auth:hover {
+    color: var(--fg);
+    border-color: var(--fg2);
+}
+
+.external-auth.primary {
+    border-color: #2563eb;
+    color: #2563eb;
+    font-weight: 600;
+}
+
+.external-url-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+}
+
+.external-url-row input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+    font-family: inherit;
+}
+
+.external-url-row button {
+    background: var(--bg2);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.4rem 1rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.external-url-row button:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.external-redirect-hint {
+    margin-bottom: 1.2rem;
+}
+
+.oauth-warning {
+    color: #b45309;
 }
 
 .external-add h3 {

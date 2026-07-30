@@ -92,6 +92,39 @@ Beacon supports these as **external servers**. Instead of discovery, Beacon conn
 
 **Or via the REST API** — `POST /api/external` with the same JSON, or with a single `{"name": ..., "url": ..., "headers": {...}}` object. `GET /api/external` lists configured servers (header *values* are redacted, only key names are returned). `DELETE /api/external/{name}` removes one.
 
+### OAuth-Protected Servers
+
+Many hosted MCP endpoints don't take a pasted token at all — they want an OAuth 2.1 authorization flow. For those, paste **just the URL** into **Add by URL** (or `POST /api/external` with `{"url": "..."}`):
+
+```bash
+curl -X POST http://localhost:9300/api/external \
+  -H 'Content-Type: application/json' \
+  -d '{"url": "https://beacon.example.com/mcp"}'
+```
+
+Beacon connects, sees the `401`, and marks the server **needs auth**. Click **Connect** and it runs the whole flow — discovers the authorization server, registers itself as a client dynamically, and opens the login in a popup. When you finish logging in, the tokens are stored and refreshed automatically from then on.
+
+Tokens live in `/app/data/oauth/{name}.json` (mode `0600`) and survive restarts.
+
+The redirect URI Beacon registers is shown in the UI. It defaults to `http://localhost:{WEB_PORT}/api/oauth/callback`; set `OAUTH_REDIRECT_BASE_URL` if you reach the UI on a different origin, since the authorization server sends the browser back to the URI that was registered.
+
+If the remote issues no refresh token (some advertise only their own scope, so no client ever asks for offline access), add `"scopes": "<their-scope> offline_access"` to the server's config.
+
+### Federating Another Beacon
+
+Point Beacon at another Beacon and it doesn't nest it — it **imports** it. A remote Beacon only exposes its four meta-tools, so nesting would hide everything behind it. Instead each remote server is registered locally under a prefix:
+
+```
+yunderalabs.docmost-mcp__search_pages
+yunderalabs.n8n-mcp__list_workflows
+```
+
+`overview`, `tool_doc` and `server_doc` work on them exactly like local servers, and `call` transparently routes through the remote. Combined with the OAuth support above, adding a remote Beacon is one URL and one login.
+
+Beacons stamp an instance id into what they export, so two Beacons pointed at each other detect the cycle and skip the servers that would loop. Set `"federate": "off"` on a config to keep a remote Beacon nested instead.
+
+> ⚠ Beacon does not authenticate its own callers. Federating a remote makes everything behind it reachable by anyone who can reach your `/mcp/` — keep it on localhost.
+
 ### Docker Networking
 
 All services must be on the same Docker bridge network. Create the shared network before starting any stack:
@@ -241,6 +274,28 @@ environment:
   PUBLIC_URL: "https://beacon.example.com/mcp"
   AUTH_HASH: "your-hash-token"
 ```
+
+Note that `/api/oauth/callback` must stay reachable *without* the proxy's own auth — a remote authorization server redirects the browser back to the URI Beacon registered, and it will not carry a `?hash=`.
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DISCOVERY_PORT` | `9099` | UDP port for discovery |
+| `DISCOVERY_INTERVAL` | `60` | Seconds between discovery cycles |
+| `WEB_PORT` | `3000` | HTTP port for Web UI + MCP endpoint |
+| `MCP_URL` | `http://beacon:9300/mcp` | URL advertised to servers |
+| `MCP_CLIENT_TIMEOUT` | `300` | HTTP read timeout (seconds) for proxied tool calls |
+| `EXTERNAL_CONFIG_PATH` | `/app/data/external.json` | Where external server configs are persisted |
+| `EXTERNAL_POLL_INTERVAL` | `60` | Seconds between external tool-list refreshes |
+| `ANNOTATIONS_CONFIG_PATH` | `/app/data/annotations.json` | Where description overrides and notes are persisted |
+| `OAUTH_CONFIG_DIR` | `/app/data/oauth` | Per-server OAuth tokens + registered client (`0600`) |
+| `OAUTH_REDIRECT_BASE_URL` | _(derived)_ | Browser-reachable base for the OAuth callback; falls back to the origin of `PUBLIC_URL`, then `http://localhost:{WEB_PORT}` |
+| `BEACON_ID_PATH` | `/app/data/beacon-id` | Stable instance id used as the federation loop guard |
+| `PUBLIC_URL` | _(unset)_ | Externally reachable MCP URL |
+| `AUTH_HASH` | _(unset)_ | Hash token appended to `PUBLIC_URL` in the UI |
+| `OAUTH_ADMIN_URL` | _(unset)_ | Link to an external OAuth admin page (inbound auth; unrelated to the outbound OAuth above) |
+| `LOG_LEVEL` | `info` | Logging level |
 
 ## Development
 

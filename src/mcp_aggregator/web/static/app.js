@@ -17,6 +17,7 @@ async function fetchStatus() {
         if (data.hostname && data.port) {
             updateConnectionInfo(data.hostname, data.port, data.public_url, data.auth_hash, data.oauth_admin_url);
         }
+        updateOauthRedirect(data.oauth_redirect_uri);
     } catch (e) {
         document.getElementById("status-text").textContent = "Disconnected";
     }
@@ -30,6 +31,29 @@ async function fetchExternal() {
     } catch (e) {
         console.error("Failed to fetch external servers:", e);
     }
+}
+
+function updateOauthRedirect(redirectUri) {
+    const el = document.getElementById("oauth-redirect-uri");
+    if (!el || !redirectUri) return;
+    el.textContent = redirectUri;
+    const warning = document.getElementById("oauth-redirect-warning");
+    if (!warning) return;
+    // The redirect URI is registered with the remote authorization server, so it
+    // has to be the origin the browser actually comes back to. If you reached
+    // this UI on a different one, the callback will land nowhere.
+    let matches = true;
+    try {
+        matches = new URL(redirectUri).origin === window.location.origin;
+    } catch (e) {
+        matches = false;
+    }
+    if (matches) {
+        warning.style.display = "none";
+        return;
+    }
+    warning.style.display = "";
+    warning.textContent = `— does not match this page's origin (${window.location.origin}); set OAUTH_REDIRECT_BASE_URL`;
 }
 
 function deriveMcpName(publicUrl) {
@@ -107,9 +131,11 @@ function renderServers(servers) {
     }
     container.innerHTML = servers.map((s, i) => {
         const endpoint = s.url || `http://${s.ip}:${s.port}${s.path || "/mcp"}`;
-        const originTag = s.origin === "external"
-            ? '<span class="badge badge-external" title="Added manually via /api/external">external</span>'
-            : '<span class="badge badge-discovered" title="Discovered via UDP">discovered</span>';
+        const originTag = s.federated_via
+            ? `<span class="badge badge-federated" title="Reached through the Beacon '${escAttr(s.federated_via)}' (known there as '${escAttr(s.remote_name || "")}')">federated</span>`
+            : s.origin === "external"
+                ? '<span class="badge badge-external" title="Added manually via /api/external">external</span>'
+                : '<span class="badge badge-discovered" title="Discovered via UDP">discovered</span>';
         const override = s.description_override || "";
         const note = s.note || "";
         const isCustom = !!override || !!note;
@@ -220,25 +246,173 @@ function renderTool(tool, serverName) {
     `;
 }
 
+function externalAuthBadge(c) {
+    const status = (c.auth && c.auth.status) || "none";
+    if (status === "connected") {
+        const refresh = c.auth.has_refresh_token;
+        const title = refresh
+            ? "Connected. A refresh token is stored, so this survives token expiry."
+            : "Connected, but the server issued no refresh token — you will have to reconnect when it expires.";
+        return `<span class="badge badge-oauth-ok" title="${escAttr(title)}">oauth ✓${refresh ? "" : " (no refresh)"}</span>`;
+    }
+    if (status === "authorizing") {
+        return '<span class="badge badge-oauth-wait" title="Waiting for the browser login to finish">authorizing…</span>';
+    }
+    if (status === "needs_auth") {
+        return '<span class="badge badge-oauth-need" title="This server requires OAuth authorization">needs auth</span>';
+    }
+    return "";
+}
+
 function renderExternal(configs) {
     const list = document.getElementById("external-list");
     if (!configs.length) {
         list.innerHTML = '<p class="empty">No external servers configured.</p>';
         return;
     }
-    list.innerHTML = configs.map(c => `
+    list.innerHTML = configs.map(c => {
+        const status = (c.auth && c.auth.status) || "none";
+        const fedCount = (c.federated || []).length;
+        const fedBadge = fedCount
+            ? `<span class="badge badge-federated" title="${escAttr(c.federated.join(", "))}">federated: ${fedCount} server${fedCount === 1 ? "" : "s"}</span>`
+            : "";
+        const connectBtn = status === "connected"
+            ? `<button class="external-auth" onclick="disconnectExternal('${escAttr(c.name)}')" title="Forget the stored tokens">Disconnect</button>`
+            : (status === "needs_auth" || status === "authorizing" || c.oauth)
+                ? `<button class="external-auth primary" onclick="connectExternal('${escAttr(c.name)}')">Connect</button>`
+                : "";
+        return `
         <div class="external-row">
             <div class="external-info">
                 <span class="external-name">${esc(c.name)}</span>
                 <code class="external-url">${esc(c.url)}</code>
+                ${externalAuthBadge(c)}
+                ${fedBadge}
                 ${c.header_keys.length
                     ? `<span class="external-headers" title="${esc(c.header_keys.join(", "))}">${c.header_keys.length} header${c.header_keys.length === 1 ? "" : "s"}</span>`
                     : ""}
+                ${c.error && status !== "needs_auth" ? `<span class="external-err" title="${escAttr(c.error)}">⚠</span>` : ""}
             </div>
-            <button class="external-delete" onclick="deleteExternal('${esc(c.name)}')" title="Remove">Remove</button>
-        </div>
-    `).join("");
+            <div class="external-row-actions">
+                ${connectBtn}
+                <button class="external-delete" onclick="deleteExternal('${escAttr(c.name)}')" title="Remove">Remove</button>
+            </div>
+        </div>`;
+    }).join("");
 }
+
+async function addExternalUrl() {
+    const input = document.getElementById("external-url");
+    const btn = document.getElementById("external-url-btn");
+    const feedback = document.getElementById("external-feedback");
+    feedback.textContent = "";
+    feedback.className = "external-feedback";
+
+    const url = input.value.trim();
+    if (!url) {
+        feedback.textContent = "Enter the MCP endpoint URL first.";
+        feedback.classList.add("error");
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = "Adding...";
+    try {
+        const res = await fetch("/api/external", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            feedback.textContent = data.error || `HTTP ${res.status}`;
+            feedback.classList.add("error");
+            return;
+        }
+        const added = data.added[0] || {};
+        input.value = "";
+        await Promise.all([fetchExternal(), fetchServers(), fetchStatus()]);
+        if (added.auth_required) {
+            // The server wants OAuth — go straight into the flow rather than
+            // making the user hunt for the Connect button.
+            feedback.textContent = `${added.name} requires authorization — opening login…`;
+            await connectExternal(added.name);
+            return;
+        }
+        feedback.textContent = added.error
+            ? `${added.name}: ${added.error}`
+            : `Added ${added.name} (${added.tools} tool${added.tools === 1 ? "" : "s"}).`;
+        feedback.classList.add(added.error ? "error" : "success");
+    } catch (e) {
+        feedback.textContent = `Error: ${e.message}`;
+        feedback.classList.add("error");
+    } finally {
+        btn.disabled = false;
+        btn.textContent = "Add";
+    }
+}
+
+async function connectExternal(name) {
+    const feedback = document.getElementById("external-feedback");
+    feedback.className = "external-feedback";
+    feedback.textContent = `Starting authorization for ${name}…`;
+    // Open the popup before the await: browsers block window.open once the
+    // gesture that triggered it has been consumed by a network round-trip.
+    const popup = window.open("", "beacon-oauth", "width=520,height=720");
+    try {
+        const res = await fetch(`/api/external/${encodeURIComponent(name)}/authorize`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) {
+            if (popup) popup.close();
+            feedback.textContent = data.error || `HTTP ${res.status}`;
+            feedback.classList.add("error");
+            await fetchExternal();
+            return;
+        }
+        if (popup) {
+            popup.location = data.authorize_url;
+        } else {
+            feedback.innerHTML = `Popup blocked — <a href="${escAttr(data.authorize_url)}" target="_blank" rel="noopener">open the login manually</a>.`;
+        }
+        feedback.textContent = `Waiting for you to finish logging in to ${name}…`;
+    } catch (e) {
+        if (popup) popup.close();
+        feedback.textContent = `Error: ${e.message}`;
+        feedback.classList.add("error");
+    }
+}
+
+async function disconnectExternal(name) {
+    if (!confirm(`Forget the stored OAuth tokens for "${name}"?`)) return;
+    try {
+        const res = await fetch(`/api/external/${encodeURIComponent(name)}/authorize`, { method: "DELETE" });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            alert(data.error || `HTTP ${res.status}`);
+            return;
+        }
+        await Promise.all([fetchExternal(), fetchServers()]);
+    } catch (e) {
+        alert(`Error: ${e.message}`);
+    }
+}
+
+// The OAuth popup posts back when the callback lands, so the UI updates as soon
+// as the flow completes instead of waiting for the next poll.
+window.addEventListener("message", async (event) => {
+    const data = event.data;
+    if (!data || data.source !== "beacon-oauth") return;
+    const feedback = document.getElementById("external-feedback");
+    if (feedback) {
+        feedback.className = "external-feedback " + (data.ok ? "success" : "error");
+        feedback.textContent = data.ok
+            ? `Connected ${data.name || ""}.`.trim()
+            : `Authorization failed${data.name ? ` for ${data.name}` : ""}.`;
+    }
+    // The background flow still has to exchange the code for a token and
+    // refresh the tool list; give it a moment before reading the state back.
+    setTimeout(() => Promise.all([fetchExternal(), fetchServers(), fetchStatus()]), 1500);
+});
 
 async function addExternal() {
     const btn = document.getElementById("external-add-btn");

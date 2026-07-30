@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -66,12 +67,17 @@ async def call_remote_tool(
     arguments: dict[str, Any] | None = None,
     timeout: Any = _USE_DEFAULT,
     display_name: str | None = None,
+    auth: httpx.Auth | None = None,
 ) -> types.CallToolResult:
     """Call a tool on a remote MCP server via streamable HTTP.
 
     `tool_name` is the bare name sent to the remote server; `display_name` is the
     namespaced name the caller used (e.g. 'blackhole__hang') and is used only in
     log/error text so a failure names the tool the caller actually invoked.
+
+    `auth` is an optional httpx auth flow (e.g. the MCP SDK's OAuthClientProvider)
+    applied on top of `headers`; it is what carries OAuth bearer tokens and their
+    refresh.
 
     timeout semantics:
       - _USE_DEFAULT  → use MCP_CLIENT_TIMEOUT (the global default)
@@ -86,7 +92,12 @@ async def call_remote_tool(
         # dead host fails fast instead of hanging on the TCP handshake.
         connect = 10.0 if effective is None or effective >= 10.0 else effective
         http_timeout = httpx.Timeout(effective, connect=connect)
-        async with httpx.AsyncClient(headers=headers, timeout=http_timeout) as http_client:
+        # follow_redirects: MCP endpoints commonly redirect /mcp -> /mcp/ (Beacon
+        # itself does), and a pasted URL without the trailing slash would
+        # otherwise fail with a bare 307.
+        async with httpx.AsyncClient(
+            headers=headers, timeout=http_timeout, auth=auth, follow_redirects=True
+        ) as http_client:
             async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream, _):
                 async with ClientSession(read_stream, write_stream) as session:
                     await session.initialize()
@@ -115,15 +126,33 @@ async def call_remote_tool(
         )
 
 
+@dataclass
+class RemoteInfo:
+    """What a single `initialize` + `tools/list` round-trip tells us about a server."""
+
+    instructions: str = ""
+    tools: list[dict] = field(default_factory=list)
+    # serverInfo from the initialize result — used to recognise that a remote is
+    # itself a Beacon, so its registry can be federated instead of nested.
+    server_name: str = ""
+    server_version: str = ""
+
+    def tool_names(self) -> set[str]:
+        return {t["name"] for t in self.tools}
+
+
 async def fetch_remote_tools(
     url: str,
     headers: dict[str, str],
     connect_timeout: float = 10.0,
     read_timeout: float = 30.0,
-) -> tuple[str, list[dict]]:
-    """Connect to a remote MCP server and return (server instructions, tool list)."""
+    auth: httpx.Auth | None = None,
+) -> RemoteInfo:
+    """Connect to a remote MCP server and return its instructions, tools and identity."""
     timeout = httpx.Timeout(read_timeout, connect=connect_timeout)
-    async with httpx.AsyncClient(headers=headers, timeout=timeout) as http_client:
+    async with httpx.AsyncClient(
+        headers=headers, timeout=timeout, auth=auth, follow_redirects=True
+    ) as http_client:
         async with streamable_http_client(url, http_client=http_client) as (read_stream, write_stream, _):
             async with ClientSession(read_stream, write_stream) as session:
                 init_result = await session.initialize()
@@ -136,4 +165,10 @@ async def fetch_remote_tools(
                     }
                     for t in tools_result.tools
                 ]
-                return (init_result.instructions or "", tools)
+                info = init_result.serverInfo
+                return RemoteInfo(
+                    instructions=init_result.instructions or "",
+                    tools=tools,
+                    server_name=getattr(info, "name", "") or "",
+                    server_version=getattr(info, "version", "") or "",
+                )

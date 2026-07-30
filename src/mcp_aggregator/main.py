@@ -9,6 +9,8 @@ import uvicorn
 from mcp_aggregator.annotations import AnnotationStore
 from mcp_aggregator.discovery import run_discovery
 from mcp_aggregator.external import ExternalManager
+from mcp_aggregator.federation import load_beacon_id
+from mcp_aggregator.oauth import BeaconOAuthManager
 from mcp_aggregator.registry import Registry
 from mcp_aggregator.web.api import create_web_app
 
@@ -52,9 +54,15 @@ async def main() -> None:
     annotations = AnnotationStore()
     annotations.load()
     logger.info("Loaded %d description override(s)", len(annotations.all()))
-    registry = Registry(annotations=annotations)
 
-    external_manager = ExternalManager(registry)
+    beacon_id = load_beacon_id()
+    registry = Registry(annotations=annotations, beacon_id=beacon_id)
+    logger.info("Beacon instance id: %s", beacon_id)
+
+    oauth_manager = BeaconOAuthManager()
+    logger.info("OAuth redirect URI: %s", oauth_manager.redirect_uri)
+
+    external_manager = ExternalManager(registry, oauth_manager)
     external_manager.load()
     logger.info("Loaded %d external server config(s)", len(external_manager.configs))
 
@@ -74,6 +82,7 @@ async def main() -> None:
         registry,
         external_manager,
         annotations,
+        oauth_manager,
         discovery_port=discovery_port,
         public_url=public_url,
         auth_hash=auth_hash,

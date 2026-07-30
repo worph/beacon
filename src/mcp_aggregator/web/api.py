@@ -1,19 +1,23 @@
 """REST API and static file serving for the web UI."""
 
 import contextlib
+import json
 import logging
 import os
+import re
 import time
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 from mcp_aggregator.annotations import AnnotationStore
 from mcp_aggregator.discovery import run_discovery
-from mcp_aggregator.external import ExternalConfig, ExternalManager
+from mcp_aggregator.external import ExternalConfig, ExternalManager, config_from_entry
 from mcp_aggregator.mcp_proxy import META_TOOLS, create_mcp_session_manager
+from mcp_aggregator.oauth import BeaconOAuthManager
 from mcp_aggregator.registry import Registry
 
 logger = logging.getLogger(__name__)
@@ -39,12 +43,33 @@ def _server_dict(s, override: str | None = None, note: str | None = None) -> dic
         "origin": s.origin,
         "last_seen": s.last_seen,
         "error": s.error,
+        # Federation: set when this server is reached through another Beacon.
+        "federated_via": s.federated_via,
+        "remote_name": s.remote_name,
+        "auth_required": s.auth_required,
     }
 
 
+def _derive_name(url: str) -> str:
+    """Best-effort server name from a URL, for the add-by-URL flow.
+
+    `https://beacon-yunderalabs.nsl.sh/mcp` -> `beacon-yunderalabs`. The user can
+    override it; this only has to be reasonable and stable.
+    """
+    host = urlparse(url).hostname or ""
+    label = host.split(".")[0] if host else "external"
+    label = re.sub(r"[^A-Za-z0-9_.-]", "-", label).strip("-.")
+    return label or "external"
+
+
 def _parse_external_payload(payload: dict) -> list[ExternalConfig]:
-    """Accept either a single server `{name, url, headers?, description?}` or a
-    bundle `{mcpServers: {name: {url, headers?, type?, description?}}}`."""
+    """Accept a single server or a bundle.
+
+    Single: `{url, name?, headers?, description?, scopes?, federate?, ...}` —
+    `name` is optional and derived from the URL when omitted, which is what makes
+    "paste one URL" work for OAuth servers.
+    Bundle: `{mcpServers: {name: {url, ...}}}`.
+    """
     if "mcpServers" in payload:
         bundle = payload.get("mcpServers") or {}
         if not isinstance(bundle, dict):
@@ -53,45 +78,49 @@ def _parse_external_payload(payload: dict) -> list[ExternalConfig]:
         for name, entry in bundle.items():
             if not isinstance(entry, dict):
                 raise ValueError(f"{name}: entry must be an object")
-            url = entry.get("url")
-            if not url:
-                raise ValueError(f"{name}: missing url")
-            headers = entry.get("headers") or {}
-            if not isinstance(headers, dict):
-                raise ValueError(f"{name}: headers must be an object")
-            out.append(ExternalConfig(
-                name=name,
-                url=url,
-                headers={str(k): str(v) for k, v in headers.items()},
-                description=entry.get("description", "") or "",
-            ))
+            out.append(config_from_entry(name, entry))
         return out
 
-    name = payload.get("name")
     url = payload.get("url")
-    if not name or not url:
-        raise ValueError("Request must include `name` and `url`, or an `mcpServers` bundle")
-    headers = payload.get("headers") or {}
-    if not isinstance(headers, dict):
-        raise ValueError("headers must be an object")
-    return [ExternalConfig(
-        name=str(name),
-        url=str(url),
-        headers={str(k): str(v) for k, v in headers.items()},
-        description=str(payload.get("description") or ""),
-    )]
+    if not url:
+        raise ValueError("Request must include `url`, or an `mcpServers` bundle")
+    name = payload.get("name") or _derive_name(str(url))
+    entry = {k: v for k, v in payload.items() if k != "name"}
+    return [config_from_entry(str(name), entry)]
+
+
+def _callback_page(message: str, name: str | None, ok: bool) -> str:
+    """Tiny self-closing page shown in the OAuth popup.
+
+    It notifies the opener so the UI can refresh immediately instead of waiting
+    for the next poll, then closes itself.
+    """
+    colour = "#2e7d32" if ok else "#c62828"
+    safe = message.replace("<", "&lt;").replace(">", "&gt;")
+    payload = f'{{"source":"beacon-oauth","ok":{"true" if ok else "false"},"name":{json.dumps(name)}}}'
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><title>Beacon — OAuth</title></head>
+<body style="font-family:system-ui,sans-serif;padding:2rem;text-align:center">
+  <p style="color:{colour};font-size:1.1rem">{safe}</p>
+  <script>
+    try {{ window.opener && window.opener.postMessage({payload}, "*"); }} catch (e) {{}}
+    if ({"true" if ok else "false"}) setTimeout(function () {{ window.close(); }}, 1200);
+  </script>
+</body></html>"""
 
 
 def create_web_app(
     registry: Registry,
     external_manager: ExternalManager,
     annotations: AnnotationStore,
+    oauth_manager: BeaconOAuthManager | None = None,
     discovery_port: int = 9099,
     public_url: str | None = None,
     auth_hash: str | None = None,
     oauth_admin_url: str | None = None,
 ) -> FastAPI:
-    session_manager = create_mcp_session_manager(registry)
+    oauth = oauth_manager or external_manager.oauth
+    session_manager = create_mcp_session_manager(registry, external_manager.auth_for_server)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -151,15 +180,25 @@ def create_web_app(
     @app.get("/api/external")
     async def list_external():
         # Redact headers in responses — they often contain secrets (bearer tokens).
-        return [
-            {
+        out = []
+        for c in external_manager.list_configs():
+            group = registry.external_group(c.name)
+            out.append({
                 "name": c.name,
                 "url": c.url,
                 "description": c.description,
                 "header_keys": list(c.headers.keys()),
-            }
-            for c in external_manager.list_configs()
-        ]
+                "oauth": c.oauth,
+                "scopes": c.scopes,
+                "federate": c.federate,
+                "auth": oauth.summary(c.name) if c.oauth else {"status": "none"},
+                # Names this config contributes to the registry: itself for a
+                # plain server, one per remote server once federated.
+                "servers": [s.name for s in group],
+                "federated": [s.name for s in group if s.federated_via],
+                "error": next((s.error for s in group if s.error), None),
+            })
+        return out
 
     @app.post("/api/external")
     async def add_external(request: Request):
@@ -176,11 +215,15 @@ def create_web_app(
         for cfg in configs:
             external_manager.upsert(cfg)
             await external_manager.refresh_one(cfg)
-            srv = registry.servers.get(cfg.name)
+            group = registry.external_group(cfg.name)
+            needs_auth = any(s.auth_required for s in group)
             added.append({
                 "name": cfg.name,
-                "tools": len(srv.tools) if srv else 0,
-                "error": srv.error if srv else None,
+                "tools": sum(len(s.tools) for s in group),
+                "servers": [s.name for s in group],
+                "error": next((s.error for s in group if s.error), None),
+                # The UI turns this into a "Connect" button rather than an error.
+                "auth_required": needs_auth,
             })
         return {"added": added}
 
@@ -190,6 +233,59 @@ def create_web_app(
         if not removed:
             return JSONResponse({"error": "Not found"}, status_code=404)
         return {"removed": name}
+
+    @app.post("/api/external/{name}/authorize")
+    async def authorize_external(name: str):
+        cfg = external_manager.get(name)
+        if cfg is None:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        try:
+            url = await external_manager.authorize(cfg)
+        except Exception as e:
+            logger.error("Authorization for %r failed to start: %s", name, e)
+            return JSONResponse({"error": str(e)}, status_code=400)
+        return {"name": name, "authorize_url": url, "redirect_uri": oauth.redirect_uri}
+
+    @app.delete("/api/external/{name}/authorize")
+    async def deauthorize_external(name: str):
+        cfg = external_manager.get(name)
+        if cfg is None:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        cleared = oauth.disconnect(name)
+        oauth.mark_needs_auth(name)
+        await external_manager.refresh_one(cfg)
+        return {"name": name, "cleared": cleared}
+
+    @app.get("/api/oauth/callback")
+    async def oauth_callback(request: Request):
+        """Redirect target for every external server's OAuth flow.
+
+        Resolves the pending authorization keyed by `state`, then closes itself;
+        the real work continues in the background task that started the flow.
+        """
+        params = request.query_params
+        state = params.get("state") or ""
+        error = params.get("error")
+        code = params.get("code")
+
+        if error:
+            name = oauth.fail_callback(state, f"{error}: {params.get('error_description', '')}")
+            return HTMLResponse(_callback_page(f"Authorization failed: {error}", name, ok=False))
+        if not code or not state:
+            return HTMLResponse(
+                _callback_page("Missing code or state in the OAuth redirect.", None, ok=False),
+                status_code=400,
+            )
+        name = oauth.complete_callback(state, code)
+        if name is None:
+            return HTMLResponse(
+                _callback_page(
+                    "No authorization is waiting for this response — it may have timed out.",
+                    None, ok=False,
+                ),
+                status_code=400,
+            )
+        return HTMLResponse(_callback_page(f"Connected {name}. You can close this window.", name, ok=True))
 
     @app.post("/api/external/refresh")
     async def refresh_external():
@@ -263,6 +359,10 @@ def create_web_app(
             "public_url": public_url,
             "auth_hash": auth_hash,
             "oauth_admin_url": oauth_admin_url,
+            # Redirect URI registered with remote authorization servers. Shown in
+            # the UI so a mismatch with the browser's origin is obvious.
+            "oauth_redirect_uri": oauth.redirect_uri,
+            "beacon_id": registry.beacon_id,
             "uptime_seconds": round(time.time() - _start_time, 1),
             "servers": len(registry.servers),
             "tools": total_tools,

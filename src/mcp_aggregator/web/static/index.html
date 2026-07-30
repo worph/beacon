@@ -60,10 +60,29 @@
                 <div id="external-list" class="external-list"></div>
 
                 <div class="external-add">
-                    <h3>Add server(s)</h3>
+                    <h3>Add by URL</h3>
+                    <p class="hint">
+                        Paste the MCP endpoint. If it requires OAuth, Beacon registers itself with the remote
+                        authorization server and you finish the login in a popup. If it turns out to be another
+                        Beacon, its servers are imported individually instead of being nested behind its meta-tools.
+                    </p>
+                    <div class="external-url-row">
+                        <input id="external-url" type="url" spellcheck="false" autocomplete="off"
+                               placeholder="https://beacon.example.com/mcp">
+                        <button id="external-url-btn" onclick="addExternalUrl()">Add</button>
+                    </div>
+                    <p class="hint external-redirect-hint">
+                        OAuth redirect URI: <code id="oauth-redirect-uri">…</code>
+                        <span id="oauth-redirect-warning" class="oauth-warning" style="display:none"></span>
+                    </p>
+
+                    <h3>Add server(s) as JSON</h3>
                     <p class="hint">
                         Paste a <code>mcpServers</code> JSON bundle (Claude Desktop format) <em>or</em> a single
-                        <code>{ "name": ..., "url": ..., "headers": { ... } }</code> object.
+                        <code>{ "name": ..., "url": ..., "headers": { ... } }</code> object. Optional per-server keys:
+                        <code>scopes</code> (force OAuth scopes, e.g. <code>"mcp offline_access"</code>),
+                        <code>federate</code> (<code>auto</code>/<code>on</code>/<code>off</code>),
+                        <code>client_id</code>/<code>client_secret</code>.
                     </p>
                     <textarea id="external-json" rows="10" spellcheck="false" placeholder='{
   "mcpServers": {

@@ -26,6 +26,17 @@ class RegisteredServer:
     origin: str = "discovery"  # "discovery" | "external"
     last_seen: float = field(default_factory=time.time)
     error: str | None = None
+    # Federation: this server lives behind another Beacon rather than being
+    # reachable directly. `federated_via` is the external config whose URL we
+    # talk to; `remote_name` is what the server is called over there, which is
+    # what the remote `call` meta-tool expects. `origin_chain` records the
+    # Beacons a server has already travelled through, so re-export can't loop.
+    federated_via: str | None = None
+    remote_name: str | None = None
+    origin_chain: list[str] = field(default_factory=list)
+    # True when the server needs an interactive OAuth authorization before it
+    # can be reached — distinct from a generic connection error.
+    auth_required: bool = False
 
     def endpoint_url(self) -> str:
         if self.url:
@@ -36,11 +47,18 @@ class RegisteredServer:
 class Registry:
     """Stores MCP servers (discovered + external) and provides namespaced tool lookups."""
 
-    def __init__(self, annotations=None) -> None:
+    def __init__(self, annotations=None, beacon_id: str = "") -> None:
         self._discovered: dict[str, RegisteredServer] = {}
         self._external: dict[str, RegisteredServer] = {}
+        # One external *config* can contribute several registry entries (a
+        # federated Beacon contributes one per remote server), so ownership is
+        # tracked separately: registry name -> external config name.
+        self._external_owner: dict[str, str] = {}
         # Optional AnnotationStore: provides per-server description overrides.
         self._annotations = annotations
+        # Stable identity of this Beacon, stamped into exported registries so a
+        # federation cycle is detectable.
+        self.beacon_id = beacon_id
 
     def describe(self, server: RegisteredServer) -> str:
         """Effective description for a server: user override if set, else discovered."""
@@ -84,11 +102,35 @@ class Registry:
             logger.info("Removed servers: %s", removed)
         self._discovered = new_servers
 
-    def set_external(self, name: str, server: RegisteredServer) -> None:
-        self._external[name] = server
+    def replace_external_group(self, config_name: str, servers: dict[str, RegisteredServer]) -> None:
+        """Replace every registry entry owned by an external config.
 
-    def remove_external(self, name: str) -> bool:
-        return self._external.pop(name, None) is not None
+        A plain external server contributes one entry keyed by its own name; a
+        federated Beacon contributes one per remote server. Either way the whole
+        group is swapped atomically so a shrinking remote does not leave ghosts.
+        """
+        for name, owner in list(self._external_owner.items()):
+            if owner == config_name and name not in servers:
+                self._external.pop(name, None)
+                del self._external_owner[name]
+        for name, server in servers.items():
+            self._external[name] = server
+            self._external_owner[name] = config_name
+
+    def remove_external_group(self, config_name: str) -> bool:
+        """Drop every registry entry owned by an external config."""
+        names = [n for n, owner in self._external_owner.items() if owner == config_name]
+        for name in names:
+            self._external.pop(name, None)
+            del self._external_owner[name]
+        return bool(names)
+
+    def external_group(self, config_name: str) -> list[RegisteredServer]:
+        return [
+            self._external[n]
+            for n, owner in self._external_owner.items()
+            if owner == config_name and n in self._external
+        ]
 
     def list_external(self) -> list[RegisteredServer]:
         return list(self._external.values())
@@ -164,6 +206,37 @@ class Registry:
             doc["notes"] = note
         doc["tools"] = tools
         return doc
+
+    def export_registry(self) -> dict:
+        """Structured registry for another Beacon to federate.
+
+        Tool names are bare (unnamespaced) — the consumer re-namespaces them
+        under its own prefix. `origin_chain` grows by one Beacon id per hop, and
+        already contains this Beacon's id, so a downstream Beacon that finds its
+        own id in the chain knows it is looking at a cycle.
+        """
+        servers = []
+        for server in self.servers.values():
+            chain = list(server.origin_chain)
+            if self.beacon_id and self.beacon_id not in chain:
+                chain.append(self.beacon_id)
+            servers.append(
+                {
+                    "name": server.name,
+                    "description": self.describe(server),
+                    "tools": [
+                        {
+                            "name": t["name"],
+                            "description": t.get("description", ""),
+                            "inputSchema": t.get("inputSchema", {"type": "object", "properties": {}}),
+                        }
+                        for t in server.tools
+                    ],
+                    "notes": (self._annotations.get_note(server.name) if self._annotations else None),
+                    "origin_chain": chain,
+                }
+            )
+        return {"beacon_id": self.beacon_id, "servers": servers}
 
     def get_direct_tools(self) -> list[dict]:
         """Return namespaced tool dicts for tools marked as direct."""

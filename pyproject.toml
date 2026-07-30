@@ -4,7 +4,11 @@ version = "0.1.0"
 description = "Local-only MCP aggregator with UDP broadcast discovery"
 requires-python = ">=3.13"
 dependencies = [
-    "mcp>=1.26.0",
+    # Upper bound is deliberate: mcp 2.0 reworks the lowlevel Server API
+    # (no list_tools/call_tool decorators) and the client auth internals this
+    # project builds on. Unpinned, any rebuild silently jumps to 2.x and the
+    # container fails at startup.
+    "mcp>=1.26.0,<2",
     "fastapi",
     "uvicorn[standard]",
     "httpx",

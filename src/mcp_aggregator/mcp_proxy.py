@@ -3,8 +3,9 @@
 import contextlib
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
+import httpx
 import mcp.types as types
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -12,7 +13,7 @@ from starlette.applications import Starlette
 from starlette.routing import Mount
 
 from mcp_aggregator.mcp_client import _USE_DEFAULT, build_auth_headers, call_remote_tool
-from mcp_aggregator.registry import RegisteredServer, Registry
+from mcp_aggregator.registry import NAMESPACE_SEP, RegisteredServer, Registry
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,14 @@ logger = logging.getLogger(__name__)
 # strips before forwarding to the remote tool. Absent → global default; 0 → no timeout;
 # > 0 → that many seconds. Works on both the `call` meta-tool and direct tool calls.
 RESERVED_TIMEOUT_KEY = "__beacon_timeout"
+
+# Beacon-to-Beacon plumbing: returns the whole registry as JSON so another
+# Beacon can flatten it. Deliberately NOT advertised in list_tools — an LLM has
+# no use for it and it would cost context on every session.
+REGISTRY_TOOL_NAME = "beacon_registry"
+
+# Resolves a server to the httpx auth flow to use for it (OAuth), or None.
+AuthResolver = Callable[[Any], "httpx.Auth | None"]
 
 
 def pop_timeout(arguments: dict[str, Any] | None) -> tuple[Any, dict[str, Any] | None]:
@@ -117,16 +126,54 @@ async def _dispatch(
     arguments: dict[str, Any] | None,
     timeout: Any = _USE_DEFAULT,
     display_name: str | None = None,
+    auth_for: AuthResolver | None = None,
 ) -> types.CallToolResult:
     """Route a tool call to a discovered or external server using its configured URL/headers."""
     url = srv.endpoint_url()
     headers = dict(srv.headers) if srv.headers else build_auth_headers(srv.auth)
+    auth = auth_for(srv) if auth_for is not None else None
+
+    if srv.auth_required:
+        # Fail fast instead of queueing behind an OAuth flow: the SDK provider
+        # holds its context lock for the whole authorization, including the wait
+        # for a human, so a call issued now could block for minutes.
+        return types.CallToolResult(
+            content=[types.TextContent(
+                type="text",
+                text=(
+                    f"Cannot call {display_name or tool_name}: server {srv.name!r} is not "
+                    "authorized. Connect it from the Beacon UI first."
+                ),
+            )],
+            isError=True,
+        )
+
+    if srv.federated_via:
+        # The server lives behind another Beacon: wrap the call in that Beacon's
+        # `call` meta-tool, re-namespaced to the name it uses over there.
+        inner_args = dict(arguments or {})
+        if timeout is not _USE_DEFAULT:
+            # Give the remote the same bound we're using, or it applies its own
+            # default and gives up while we are still waiting.
+            inner_args[RESERVED_TIMEOUT_KEY] = 0 if timeout is None else timeout
+        return await call_remote_tool(
+            url,
+            headers,
+            "call",
+            {"tool_name": f"{srv.remote_name}{NAMESPACE_SEP}{tool_name}", "arguments": inner_args},
+            timeout=timeout,
+            display_name=display_name,
+            auth=auth,
+        )
+
     return await call_remote_tool(
-        url, headers, tool_name, arguments, timeout=timeout, display_name=display_name
+        url, headers, tool_name, arguments, timeout=timeout, display_name=display_name, auth=auth
     )
 
 
-def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
+def _create_mcp_server(
+    registry: Registry, auth_for: AuthResolver | None = None
+) -> StreamableHTTPSessionManager:
     """Build the MCP server and return its session manager."""
     server = Server(
         name="mcp-aggregator",
@@ -163,6 +210,14 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
     @server.call_tool()
     async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
         arguments = arguments or {}
+
+        if name == REGISTRY_TOOL_NAME:
+            # Federation endpoint for another Beacon. Unadvertised on purpose.
+            return types.CallToolResult(
+                content=[types.TextContent(
+                    type="text", text=json.dumps(registry.export_registry())
+                )],
+            )
 
         if name == "overview":
             overview = registry.get_overview_text()
@@ -207,7 +262,9 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
                 )
             srv, original_name = resolved
             timeout, tool_args = pop_timeout(tool_args)
-            return await _dispatch(srv, original_name, tool_args, timeout, display_name=tool_name)
+            return await _dispatch(
+                srv, original_name, tool_args, timeout, display_name=tool_name, auth_for=auth_for
+            )
 
         # Hybrid: direct tool call
         resolved = registry.resolve_tool(name)
@@ -218,20 +275,24 @@ def _create_mcp_server(registry: Registry) -> StreamableHTTPSessionManager:
             )
         srv, tool_name = resolved
         timeout, arguments = pop_timeout(arguments)
-        return await _dispatch(srv, tool_name, arguments, timeout, display_name=name)
+        return await _dispatch(
+            srv, tool_name, arguments, timeout, display_name=name, auth_for=auth_for
+        )
 
     session_manager = StreamableHTTPSessionManager(app=server, stateless=True)
     return session_manager
 
 
-def create_mcp_session_manager(registry: Registry) -> StreamableHTTPSessionManager:
+def create_mcp_session_manager(
+    registry: Registry, auth_for: AuthResolver | None = None
+) -> StreamableHTTPSessionManager:
     """Create just the session manager (for mounting into another app)."""
-    return _create_mcp_server(registry)
+    return _create_mcp_server(registry, auth_for)
 
 
-def create_mcp_app(registry: Registry) -> Starlette:
+def create_mcp_app(registry: Registry, auth_for: AuthResolver | None = None) -> Starlette:
     """Create a standalone Starlette ASGI app serving the MCP endpoint."""
-    session_manager = _create_mcp_server(registry)
+    session_manager = _create_mcp_server(registry, auth_for)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette):
