@@ -43,7 +43,7 @@
         </section>
 
         <section class="servers">
-            <h2>Discovered Servers</h2>
+            <h2>Servers</h2>
             <div id="servers-container">
                 <p class="empty">No servers discovered yet.</p>
             </div>
@@ -60,31 +60,71 @@
                 <div id="external-list" class="external-list"></div>
 
                 <div class="external-add">
-                    <h3>Add by URL</h3>
+                    <h3>Add a server</h3>
                     <p class="hint">
                         Paste the MCP endpoint. If it requires OAuth, Beacon registers itself with the remote
                         authorization server and you finish the login in a popup. If it turns out to be another
                         Beacon, its servers are imported individually instead of being nested behind its meta-tools.
                     </p>
-                    <div class="external-url-row">
-                        <input id="external-url" type="url" spellcheck="false" autocomplete="off"
-                               placeholder="https://beacon.example.com/mcp">
-                        <button id="external-url-btn" onclick="addExternalUrl()">Add</button>
-                    </div>
-                    <p class="hint external-redirect-hint">
-                        OAuth redirect URI: <code id="oauth-redirect-uri">…</code>
-                        <span id="oauth-redirect-warning" class="oauth-warning" style="display:none"></span>
-                    </p>
 
-                    <h3>Add server(s) as JSON</h3>
-                    <p class="hint">
-                        Paste a <code>mcpServers</code> JSON bundle (Claude Desktop format) <em>or</em> a single
-                        <code>{ "name": ..., "url": ..., "headers": { ... } }</code> object. Optional per-server keys:
-                        <code>scopes</code> (force OAuth scopes, e.g. <code>"mcp offline_access"</code>),
-                        <code>federate</code> (<code>auto</code>/<code>on</code>/<code>off</code>),
-                        <code>client_id</code>/<code>client_secret</code>.
-                    </p>
-                    <textarea id="external-json" rows="10" spellcheck="false" placeholder='{
+                    <div class="add-form">
+                        <label class="add-field">
+                            <span class="add-label">Name <em>(optional)</em></span>
+                            <input id="external-name" type="text" spellcheck="false" autocomplete="off"
+                                   placeholder="derived from the URL">
+                        </label>
+                        <label class="add-field add-field-wide">
+                            <span class="add-label">Remote MCP server URL</span>
+                            <input id="external-url" type="url" spellcheck="false" autocomplete="off"
+                                   placeholder="https://beacon.example.com/mcp">
+                        </label>
+                    </div>
+
+                    <div class="add-actions">
+                        <button id="external-url-btn" onclick="addExternalUrl()">Add</button>
+                        <span id="external-feedback" class="external-feedback"></span>
+                    </div>
+
+                    <details class="add-advanced">
+                        <summary>Advanced</summary>
+
+                        <p class="hint">
+                            Beacon registers itself with the remote automatically (dynamic client registration).
+                            Fill these in only if the server told you to.
+                        </p>
+                        <div class="add-form">
+                            <label class="add-field">
+                                <span class="add-label">OAuth Client ID</span>
+                                <input id="external-client-id" type="text" spellcheck="false" autocomplete="off"
+                                       placeholder="only if pre-registered">
+                            </label>
+                            <label class="add-field">
+                                <span class="add-label">OAuth Client Secret</span>
+                                <input id="external-client-secret" type="password" spellcheck="false"
+                                       autocomplete="new-password" placeholder="only if pre-registered">
+                            </label>
+                            <label class="add-field add-field-wide">
+                                <span class="add-label">OAuth Scopes</span>
+                                <input id="external-scopes" type="text" spellcheck="false" autocomplete="off"
+                                       placeholder="e.g. mcp offline_access — only if the server under-advertises">
+                            </label>
+                        </div>
+                        <p class="hint add-redirect-hint">
+                            Redirect URI registered with the remote: <code id="oauth-redirect-uri">…</code>
+                            <span id="oauth-redirect-warning" class="oauth-warning" style="display:none"></span>
+                        </p>
+
+                        <hr class="add-divider">
+
+                        <h4>Paste JSON instead</h4>
+                        <p class="hint">
+                            A <code>mcpServers</code> bundle (Claude Desktop format) or a single
+                            <code>{ "name": ..., "url": ..., "headers": { ... } }</code> object — the only way to add
+                            several at once, or to set static auth headers. Also accepts
+                            <code>scopes</code>, <code>federate</code> (<code>auto</code>/<code>on</code>/<code>off</code>),
+                            <code>client_id</code>/<code>client_secret</code>.
+                        </p>
+                        <textarea id="external-json" rows="8" spellcheck="false" placeholder='{
   "mcpServers": {
     "n8n-mcp": {
       "type": "http",
@@ -95,10 +135,11 @@
     }
   }
 }'></textarea>
-                    <div class="external-actions">
-                        <button id="external-add-btn" onclick="addExternal()">Add</button>
-                        <span id="external-feedback" class="external-feedback"></span>
-                    </div>
+                        <div class="external-actions">
+                            <button id="external-add-btn" onclick="addExternal()">Add from JSON</button>
+                            <span id="external-json-feedback" class="external-feedback"></span>
+                        </div>
+                    </details>
                 </div>
             </details>
         </section>

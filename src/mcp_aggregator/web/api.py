@@ -191,6 +191,8 @@ def create_web_app(
                 "oauth": c.oauth,
                 "scopes": c.scopes,
                 "federate": c.federate,
+                # Presence only — the secret is never returned, same policy as headers.
+                "has_client_credentials": bool(c.client_id),
                 "auth": oauth.summary(c.name) if c.oauth else {"status": "none"},
                 # Names this config contributes to the registry: itself for a
                 # plain server, one per remote server once federated.

@@ -851,14 +851,37 @@ button#discover-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     font-weight: 600;
 }
 
-.external-url-row {
+.add-form {
     display: flex;
-    gap: 0.5rem;
-    margin-bottom: 0.4rem;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
 }
 
-.external-url-row input {
-    flex: 1;
+.add-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1 1 12rem;
+    min-width: 0;
+}
+
+.add-field-wide {
+    flex: 3 1 20rem;
+}
+
+.add-label {
+    font-size: 0.75rem;
+    color: var(--fg2);
+}
+
+.add-label em {
+    font-style: normal;
+    opacity: 0.7;
+}
+
+.add-field input {
+    width: 100%;
     min-width: 0;
     background: var(--bg);
     color: var(--fg);
@@ -869,23 +892,78 @@ button#discover-btn:disabled { opacity: 0.6; cursor: not-allowed; }
     font-family: inherit;
 }
 
-.external-url-row button {
+.add-advanced {
+    margin-top: 1rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.6rem;
+}
+
+.add-advanced > summary {
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--fg2);
+    padding: 0.2rem 0;
+    user-select: none;
+}
+
+.add-advanced > summary:hover {
+    color: var(--fg);
+}
+
+.add-advanced h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+}
+
+.add-divider {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 1.2rem 0 0.9rem;
+}
+
+.add-redirect-hint {
+    margin-bottom: 0.4rem;
+}
+
+.server-via {
+    font-size: 0.7rem;
+    color: var(--fg2);
+    white-space: nowrap;
+}
+
+.server-connect {
+    margin-left: 0.1rem;
+    padding: 0.15rem 0.55rem !important;
+    font-size: 0.7rem !important;
+}
+
+.add-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.2rem;
+}
+
+.add-actions button {
     background: var(--bg2);
     color: var(--fg);
     border: 1px solid var(--border);
     border-radius: 4px;
-    padding: 0.4rem 1rem;
+    padding: 0.4rem 1.2rem;
     font-size: 0.85rem;
     cursor: pointer;
+    flex-shrink: 0;
 }
 
-.external-url-row button:disabled {
+.add-actions button:disabled {
     opacity: 0.6;
     cursor: default;
 }
 
 .external-redirect-hint {
-    margin-bottom: 1.2rem;
+    margin: 0;
 }
 
 .oauth-warning {

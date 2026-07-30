@@ -129,6 +129,10 @@ function renderServers(servers) {
         container.innerHTML = '<p class="empty">No servers discovered yet.</p>';
         return;
     }
+    // One connection can back many servers, so when it needs a login every one of
+    // them is flagged. Badge them all (they are all unreachable), but render the
+    // Connect button once — six buttons doing the same thing is just noise.
+    const connectOffered = new Set();
     container.innerHTML = servers.map((s, i) => {
         const endpoint = s.url || `http://${s.ip}:${s.port}${s.path || "/mcp"}`;
         const originTag = s.federated_via
@@ -143,14 +147,36 @@ function renderServers(servers) {
         const customTag = isCustom
             ? '<span class="badge badge-custom" title="Customized in the UI">custom</span>'
             : "";
-        const errorBanner = s.error
+        // A server needing a login is the most actionable state in the UI, so it
+        // gets a badge and a Connect button on the card itself rather than only
+        // in the connection list further down.
+        // A server needing a login is the most actionable state in the UI, so the
+        // button goes in the card *header* — inside <summary>, hence the
+        // stopPropagation, or clicking it would just toggle the card open.
+        const connectionName = s.federated_via || s.name;
+        const showConnect = s.auth_required && !connectOffered.has(connectionName);
+        if (showConnect) connectOffered.add(connectionName);
+        const authTag = s.auth_required
+            ? `<span class="badge badge-oauth-need" title="Needs an OAuth login before Beacon can reach it">needs auth</span>` +
+              (showConnect
+                  ? `<button class="external-auth primary server-connect"
+                         onclick="event.preventDefault(); event.stopPropagation(); connectExternal('${escAttr(connectionName)}')"
+                     >Connect</button>`
+                  : "")
+            : "";
+        const errorBanner = s.error && !s.auth_required
             ? `<p class="server-error">⚠ ${esc(s.error)}</p>`
+            : "";
+        const viaTag = s.federated_via
+            ? `<span class="server-via" title="Imported from the connection '${escAttr(s.federated_via)}'">via ${esc(s.federated_via)}</span>`
             : "";
         return `
         <details class="server-card">
             <summary class="server-header">
                 <span class="server-name">${esc(s.name)}</span>
                 ${originTag}
+                ${viaTag}
+                ${authTag}
                 ${customTag}
                 ${effectiveDesc ? `<span class="server-desc">${esc(effectiveDesc)}</span>` : ""}
                 <span class="server-tool-count">${s.tools.length} tool${s.tools.length !== 1 ? "s" : ""}</span>
@@ -291,6 +317,9 @@ function renderExternal(configs) {
                 ${c.header_keys.length
                     ? `<span class="external-headers" title="${esc(c.header_keys.join(", "))}">${c.header_keys.length} header${c.header_keys.length === 1 ? "" : "s"}</span>`
                     : ""}
+                ${c.has_client_credentials
+                    ? '<span class="external-headers" title="A pre-registered OAuth client ID is configured for this server">client id</span>'
+                    : ""}
                 ${c.error && status !== "needs_auth" ? `<span class="external-err" title="${escAttr(c.error)}">⚠</span>` : ""}
             </div>
             <div class="external-row-actions">
@@ -315,13 +344,27 @@ async function addExternalUrl() {
         return;
     }
 
+    // Only send the optional fields that were actually filled in — an empty
+    // client_id would otherwise suppress dynamic client registration.
+    const payload = { url };
+    const optional = {
+        name: "external-name",
+        client_id: "external-client-id",
+        client_secret: "external-client-secret",
+        scopes: "external-scopes",
+    };
+    for (const [key, id] of Object.entries(optional)) {
+        const value = (document.getElementById(id).value || "").trim();
+        if (value) payload[key] = value;
+    }
+
     btn.disabled = true;
     btn.textContent = "Adding...";
     try {
         const res = await fetch("/api/external", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
+            body: JSON.stringify(payload),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -330,7 +373,9 @@ async function addExternalUrl() {
             return;
         }
         const added = data.added[0] || {};
-        input.value = "";
+        for (const id of ["external-url", ...Object.values(optional)]) {
+            document.getElementById(id).value = "";
+        }
         await Promise.all([fetchExternal(), fetchServers(), fetchStatus()]);
         if (added.auth_required) {
             // The server wants OAuth — go straight into the flow rather than
@@ -375,6 +420,8 @@ async function connectExternal(name) {
             feedback.innerHTML = `Popup blocked — <a href="${escAttr(data.authorize_url)}" target="_blank" rel="noopener">open the login manually</a>.`;
         }
         feedback.textContent = `Waiting for you to finish logging in to ${name}…`;
+        await fetchExternal();
+        watchAuthorization(name);
     } catch (e) {
         if (popup) popup.close();
         feedback.textContent = `Error: ${e.message}`;
@@ -416,7 +463,7 @@ window.addEventListener("message", async (event) => {
 
 async function addExternal() {
     const btn = document.getElementById("external-add-btn");
-    const feedback = document.getElementById("external-feedback");
+    const feedback = document.getElementById("external-json-feedback");
     const textarea = document.getElementById("external-json");
     feedback.textContent = "";
     feedback.className = "external-feedback";
@@ -756,6 +803,63 @@ function renderMetaTool(tool) {
             </div>
         </details>
     `;
+}
+
+// --- background refresh ---------------------------------------------------
+// The page used to fetch only once at load, so anything that changed server-side
+// — a discovery cycle, a poll picking up new tools, an OAuth flow completing in
+// the popup — left the UI stale until a manual reload. Re-render on a timer
+// instead, but never while the user is typing: renderServers() rebuilds the
+// container's innerHTML and would throw away an in-progress edit.
+
+const REFRESH_INTERVAL_MS = 10000;
+const AUTH_POLL_INTERVAL_MS = 2000;
+const AUTH_POLL_TIMEOUT_MS = 180000;
+
+function isEditing() {
+    const el = document.activeElement;
+    if (!el) return false;
+    return el.tagName === "TEXTAREA" || el.tagName === "INPUT" || el.isContentEditable;
+}
+
+async function backgroundRefresh() {
+    if (document.hidden || isEditing()) return;
+    await Promise.all([fetchStatus(), fetchServers(), fetchExternal()]);
+}
+
+setInterval(backgroundRefresh, REFRESH_INTERVAL_MS);
+// Coming back to the tab is a strong hint the user wants current state — and is
+// exactly what happens after finishing a login in another window.
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) backgroundRefresh();
+});
+
+// While an authorization is in flight, poll faster so the result shows up
+// promptly even if the popup's postMessage never arrives (popup blocked, closed
+// early, or opened in a browser that isolates it).
+async function watchAuthorization(name) {
+    const deadline = Date.now() + AUTH_POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, AUTH_POLL_INTERVAL_MS));
+        let configs;
+        try {
+            configs = await (await fetch("/api/external")).json();
+        } catch (e) {
+            continue;
+        }
+        const cfg = configs.find(c => c.name === name);
+        if (!cfg) return;
+        if ((cfg.auth || {}).status !== "authorizing") {
+            await Promise.all([fetchServers(), fetchExternal(), fetchStatus()]);
+            const feedback = document.getElementById("external-feedback");
+            if (feedback && cfg.auth.status === "connected") {
+                feedback.className = "external-feedback success";
+                feedback.textContent = `Connected ${name}.`;
+            }
+            return;
+        }
+        renderExternal(configs);
+    }
 }
 
 // Initial load

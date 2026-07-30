@@ -94,7 +94,7 @@ Beacon supports these as **external servers**. Instead of discovery, Beacon conn
 
 ### OAuth-Protected Servers
 
-Many hosted MCP endpoints don't take a pasted token at all — they want an OAuth 2.1 authorization flow. For those, paste **just the URL** into **Add by URL** (or `POST /api/external` with `{"url": "..."}`):
+Many hosted MCP endpoints don't take a pasted token at all — they want an OAuth 2.1 authorization flow. For those, paste **just the URL** into the add form (or `POST /api/external` with `{"url": "..."}`):
 
 ```bash
 curl -X POST http://localhost:9300/api/external \
@@ -104,11 +104,20 @@ curl -X POST http://localhost:9300/api/external \
 
 Beacon connects, sees the `401`, and marks the server **needs auth**. Click **Connect** and it runs the whole flow — discovers the authorization server, registers itself as a client dynamically, and opens the login in a popup. When you finish logging in, the tokens are stored and refreshed automatically from then on.
 
-Tokens live in `/app/data/oauth/{name}.json` (mode `0600`) and survive restarts.
+Tokens live in `/app/data/oauth/{name}.json` (mode `0600`) and survive restarts, refreshing silently when the access token expires.
+
+Most servers need nothing else. **Advanced settings** on the add form covers the exceptions:
+
+| Field | When you need it |
+|---|---|
+| **OAuth Client ID** / **Client Secret** | The server doesn't allow dynamic client registration and gave you credentials to use instead. Leave empty otherwise — Beacon registers itself. |
+| **OAuth Scopes** | The server under-advertises its scopes. Beacon then registers *and* requests exactly what you put here. |
+
+The client secret is stored server-side and never returned by the API — `GET /api/external` reports only `has_client_credentials`.
 
 The redirect URI Beacon registers is shown in the UI. It defaults to `http://localhost:{WEB_PORT}/api/oauth/callback`; set `OAUTH_REDIRECT_BASE_URL` if you reach the UI on a different origin, since the authorization server sends the browser back to the URI that was registered.
 
-If the remote issues no refresh token (some advertise only their own scope, so no client ever asks for offline access), add `"scopes": "<their-scope> offline_access"` to the server's config.
+If the remote issues no refresh token (some advertise only their own scope, so no client ever asks for offline access), set **OAuth Scopes** to `<their-scope> offline_access`. Beacon always adds `prompt=consent` when offline access is requested — OpenID Connect Core 11.1 requires it, and without it the authorization server silently drops the scope and returns a token that cannot be renewed.
 
 ### Federating Another Beacon
 
