@@ -7,7 +7,13 @@ import socket
 import struct
 from dataclasses import dataclass, field
 
+from mcp_aggregator.mcp_client import build_auth_headers, fetch_remote_tools, format_exc
+
 logger = logging.getLogger(__name__)
+
+# Upper bound for one schema fetch, so an unresponsive server can't stall the
+# discovery loop (the streamable-HTTP client can hang on a malformed response).
+SCHEMA_FETCH_TIMEOUT = 15.0
 
 MULTICAST_GROUP = "239.255.99.1"
 DEFAULT_DISCOVERY_MSG = json.dumps({"type": "discovery"}).encode()
@@ -84,3 +90,48 @@ async def run_discovery(port: int = 9099, timeout: float = 2.0, mcp_url: str | N
         return protocol.responses
     finally:
         transport.close()
+
+
+class SchemaFetcher:
+    """Completes discovered tool lists with full definitions fetched over HTTP.
+
+    A UDP announce must fit in one 64 KB datagram, so large servers announce
+    only {name, description} — and a server whose catalog isn't loaded yet
+    announces none. Without inputSchema a caller has to guess every argument,
+    so for those servers we run `tools/list` against the announced endpoint.
+    Results are cached by endpoint + announced tool names, so a stable server
+    is fetched once rather than on every discovery cycle.
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
+
+    @staticmethod
+    def _needs_fetch(resp: DiscoveryResponse) -> bool:
+        return not resp.tools or any("inputSchema" not in t for t in resp.tools)
+
+    async def enrich(self, responses: list[DiscoveryResponse]) -> None:
+        await asyncio.gather(*(self._enrich_one(r) for r in responses if self._needs_fetch(r)))
+
+    async def _enrich_one(self, resp: DiscoveryResponse) -> None:
+        url = f"http://{resp.ip}:{resp.port}{resp.path}"
+        names = tuple(sorted(t.get("name", "") for t in resp.tools))
+        # An empty announce is never cached: it usually means the server's
+        # catalog isn't ready yet, and the next cycle should look again.
+        key = (url, names)
+        if names and key in self._cache:
+            resp.tools = self._cache[key]
+            return
+        try:
+            info = await asyncio.wait_for(
+                fetch_remote_tools(url, build_auth_headers(resp.auth)), SCHEMA_FETCH_TIMEOUT
+            )
+        except Exception as e:  # noqa: BLE001 — keep the announced list on any failure
+            logger.warning("Could not fetch full tool list for %s at %s: %s", resp.name, url, format_exc(e))
+            return
+        if not info.tools:
+            return
+        resp.tools = info.tools
+        if names:
+            self._cache[key] = info.tools
+        logger.info("Fetched %d tool definition(s) for %s over HTTP", len(info.tools), resp.name)

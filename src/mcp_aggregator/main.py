@@ -7,7 +7,7 @@ import os
 import uvicorn
 
 from mcp_aggregator.annotations import AnnotationStore
-from mcp_aggregator.discovery import run_discovery
+from mcp_aggregator.discovery import SchemaFetcher, run_discovery
 from mcp_aggregator.external import ExternalManager
 from mcp_aggregator.federation import load_beacon_id
 from mcp_aggregator.oauth import BeaconOAuthManager
@@ -17,11 +17,14 @@ from mcp_aggregator.web.api import create_web_app
 logger = logging.getLogger("mcp_aggregator")
 
 
-async def discovery_loop(registry: Registry, port: int, interval: float, mcp_url: str | None = None) -> None:
+async def discovery_loop(
+    registry: Registry, schemas: SchemaFetcher, port: int, interval: float, mcp_url: str | None = None
+) -> None:
     """Periodically discover MCP servers."""
     while True:
         try:
             responses = await run_discovery(port=port, mcp_url=mcp_url)
+            await schemas.enrich(responses)
             registry.update_from_discovery(responses)
         except Exception as e:
             logger.error("Discovery error: %s", e, exc_info=True)
@@ -74,7 +77,10 @@ async def main() -> None:
     # refreshed in the background by external_loop() in the gather() below.
     logger.info("Running initial discovery...")
     logger.info("Beacon MCP URL: %s", mcp_url)
+    schemas = SchemaFetcher()
     responses = await run_discovery(port=discovery_port, mcp_url=mcp_url)
+    # Full schemas are fetched by discovery_loop's first pass, right after the
+    # web server starts — never here, where a hung server would delay the bind.
     registry.update_from_discovery(responses)
     logger.info("Found %d discovered server(s)", len(responses))
 
@@ -95,7 +101,7 @@ async def main() -> None:
 
     await asyncio.gather(
         web_server.serve(),
-        discovery_loop(registry, discovery_port, discovery_interval, mcp_url=mcp_url),
+        discovery_loop(registry, schemas, discovery_port, discovery_interval, mcp_url=mcp_url),
         external_loop(external_manager, external_interval),
     )
 
