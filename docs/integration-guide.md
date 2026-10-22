@@ -125,21 +125,43 @@ networks:
 
 ## UDP Discovery Protocol
 
-If you're not using Python, implement the protocol directly. It's two UDP messages.
+If you're not using Python, implement the protocol directly. A responder answers three UDP requests, always as a unicast reply to the sender's address and port.
 
 ### Discovery Request (from aggregator)
 
 The aggregator sends this JSON to both multicast group `239.255.99.1:9099` and broadcast `255.255.255.255:9099`:
 
 ```json
-{"type": "discovery"}
+{"type": "discovery", "ack": "1"}
 ```
+
+An aggregator that predates ack mode sends `{"type": "discovery"}`. Every field is a string, so a responder may decode the request into a string map.
+
+### Ack (from your server, when the request has `ack`)
+
+Reply with exactly **8 bytes**, not JSON: the ASCII magic `BCNA`, then the FNV-1a 32-bit hash of your announce JSON (the exact bytes you would send as the manifest), big-endian. A process hosting several servers sends one ack per server.
+
+Why: every server answers a sweep at the same instant. Full manifests (tens of KB each) arrive at the aggregator as one burst, overflow its socket's receive buffer, and the kernel drops whole replies — servers then vanish from the registry for a cycle at random. Acks cannot overflow it.
+
+### Manifest Request (from aggregator, 1:1)
+
+When the aggregator has not seen an ack's hash from that address before, it asks for the manifest directly, on a socket of its own, retrying up to 3 times:
+
+```json
+{"type": "manifest", "rev": "9f1c03ab"}
+```
+
+Reply with your announce JSON (below). `rev` is the ack's hash as 8 lowercase hex digits; a responder serving one manifest may ignore it, one serving several replies with the manifest whose hash matches. The aggregator caches manifests by address and hash, so a server whose manifest is unchanged costs one 8-byte ack per sweep.
+
+### Legacy Discovery (no `ack`)
+
+Reply to a discovery request without `ack` with the full announce JSON, as before. This keeps older aggregators working with your server, and the aggregator still accepts a full announce from responders that predate ack mode.
 
 Discovery responders must join multicast group `239.255.99.1` to receive packets on networks where broadcast is not forwarded (e.g. plain `docker network create`). The SDKs handle this automatically.
 
-### Announce Response (from your server)
+### Announce (your manifest)
 
-Your server sends this JSON back as a unicast reply to the sender's address:
+The reply to a manifest request, and to a legacy discovery request:
 
 ```json
 {
@@ -207,13 +229,17 @@ LLM clients see and call the namespaced name. The aggregator strips the prefix a
 
 The protocol is language-agnostic. You need:
 
-1. A UDP socket listening on port `9099`, joined to multicast group `239.255.99.1`, that responds to `{"type":"discovery"}` with your announce JSON
+1. A UDP socket listening on port `9099`, joined to multicast group `239.255.99.1`, that answers discovery with an ack (or, without `ack`, the announce JSON) and a manifest request with the announce JSON
 2. An MCP server using streamable HTTP transport on port `9099` at path `/mcp`
 
 ### Go Example (UDP responder only)
 
 ```go
 func listenDiscovery(manifest []byte) {
+    h := fnv.New32a()
+    h.Write(manifest)
+    ack := binary.BigEndian.AppendUint32([]byte("BCNA"), h.Sum32())
+
     addr, _ := net.ResolveUDPAddr("udp", ":9099")
     conn, _ := net.ListenUDP("udp", addr)
     defer conn.Close()
@@ -223,7 +249,10 @@ func listenDiscovery(manifest []byte) {
         n, remote, _ := conn.ReadFromUDP(buf)
         var msg map[string]string
         json.Unmarshal(buf[:n], &msg)
-        if msg["type"] == "discovery" {
+        switch {
+        case msg["type"] == "discovery" && msg["ack"] != "":
+            conn.WriteToUDP(ack, remote)
+        case msg["type"] == "discovery", msg["type"] == "manifest":
             conn.WriteToUDP(manifest, remote)
         }
     }
@@ -244,9 +273,17 @@ const manifest = JSON.stringify({
   tools: [/* ... */],
 });
 
+let h = 0x811c9dc5; // FNV-1a 32
+for (const b of Buffer.from(manifest)) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+const ack = Buffer.alloc(8);
+ack.write('BCNA');
+ack.writeUInt32BE(h, 4);
+
 server.on('message', (msg, rinfo) => {
   const data = JSON.parse(msg);
   if (data.type === 'discovery') {
+    server.send(data.ack ? ack : manifest, rinfo.port, rinfo.address);
+  } else if (data.type === 'manifest') {
     server.send(manifest, rinfo.port, rinfo.address);
   }
 });

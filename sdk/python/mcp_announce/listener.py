@@ -11,10 +11,26 @@ logger = logging.getLogger(__name__)
 
 MULTICAST_GROUP = "239.255.99.1"
 
+# Ack mode: when a discovery request carries "ack", reply with 8 bytes —
+# b"BCNA" + the FNV-1a 32-bit hash of the manifest, big-endian — and send the
+# manifest itself only when Beacon asks for it 1:1 with {"type": "manifest"}.
+# Full manifests answered to a broadcast all land on Beacon at once and
+# overflow its socket buffer; an ack never can. Requests without "ack" (an
+# older Beacon) still get the full manifest.
+ACK_MAGIC = b"BCNA"
+
+
+def fnv1a32(data: bytes) -> int:
+    h = 0x811C9DC5
+    for b in data:
+        h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
+    return h
+
 
 class _AnnounceProtocol(asyncio.DatagramProtocol):
     def __init__(self, manifest: dict[str, Any], on_discovery: Callable[[dict[str, Any]], None] | None = None) -> None:
         self.manifest = json.dumps(manifest).encode()
+        self.ack = ACK_MAGIC + struct.pack(">I", fnv1a32(self.manifest))
         self.transport: asyncio.DatagramTransport | None = None
         self.on_discovery = on_discovery
 
@@ -24,12 +40,14 @@ class _AnnounceProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         try:
             msg = json.loads(data)
-            if msg.get("type") == "discovery":
-                logger.info("Discovery request from %s, announcing", addr)
+            if msg.get("type") == "manifest":
                 self.transport.sendto(self.manifest, addr)
+            elif msg.get("type") == "discovery":
+                logger.info("Discovery request from %s, %s", addr, "acking" if msg.get("ack") else "announcing")
+                self.transport.sendto(self.ack if msg.get("ack") else self.manifest, addr)
                 if self.on_discovery:
                     self.on_discovery({"mcp_url": msg.get("mcp_url")})
-        except (json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError, AttributeError, UnicodeDecodeError):
             pass
 
     def error_received(self, exc: Exception) -> None:

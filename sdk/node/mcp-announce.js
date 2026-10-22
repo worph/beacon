@@ -5,6 +5,27 @@
 
 const dgram = require('dgram');
 
+// Ack mode: when a discovery request carries `ack`, reply with 8 bytes —
+// 'BCNA' + the FNV-1a 32-bit hash of the manifest, big-endian — and send the
+// manifest itself only when Beacon asks for it 1:1 with {"type":"manifest"}.
+// Full manifests answered to a broadcast all land on Beacon at once and
+// overflow its socket buffer; an ack never can. Requests without `ack` (an
+// older Beacon) still get the full manifest.
+const ACK_MAGIC = Buffer.from('BCNA');
+
+function fnv1a32(buf) {
+  let h = 0x811c9dc5;
+  for (const b of buf) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  return h;
+}
+
+function ackFor(manifest) {
+  const ack = Buffer.alloc(8);
+  ACK_MAGIC.copy(ack, 0);
+  ack.writeUInt32BE(fnv1a32(manifest), 4);
+  return ack;
+}
+
 /**
  * Start a UDP listener that responds to discovery broadcasts.
  *
@@ -25,16 +46,19 @@ function createDiscoveryResponder({ name, description, tools, port = 9099, path,
   const payload = { type: 'announce', name, description, tools, port };
   if (path) payload.path = path;
   if (auth) payload.auth = auth;
-  const manifest = JSON.stringify(payload);
+  const manifest = Buffer.from(JSON.stringify(payload));
+  const ack = ackFor(manifest);
 
   const socket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
 
   socket.on('message', (data, rinfo) => {
     try {
       const msg = JSON.parse(data.toString());
-      if (msg.type === 'discovery') {
-        console.log(`Discovery request from ${rinfo.address}:${rinfo.port}, announcing`);
+      if (msg.type === 'manifest') {
         socket.send(manifest, rinfo.port, rinfo.address);
+      } else if (msg.type === 'discovery') {
+        console.log(`Discovery request from ${rinfo.address}:${rinfo.port}, ${msg.ack ? 'acking' : 'announcing'}`);
+        socket.send(msg.ack ? ack : manifest, rinfo.port, rinfo.address);
         if (onDiscovery) {
           onDiscovery({ mcp_url: msg.mcp_url || null });
         }
